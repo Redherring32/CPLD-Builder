@@ -80,18 +80,26 @@ jobs:
       - name: Smoke test (the app starts and serves the editor)
         run: |
           export CPLDGLUE_HOME="$RUNNER_TEMP/cg"
+          LOG="$RUNNER_TEMP/app.txt"
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a dist/CPLD-Builder/CPLD-Builder examples/tinytendo.cg --port 8799 &
+            xvfb-run -a dist/CPLD-Builder/CPLD-Builder examples/tinytendo.cg --port 8799 > "$LOG" 2>&1 &
           else
-            dist/CPLD-Builder/CPLD-Builder.exe examples/tinytendo.cg --port 8799 &
+            dist/CPLD-Builder/CPLD-Builder.exe examples/tinytendo.cg --port 8799 > "$LOG" 2>&1 &
           fi
+          ok=0
           for i in $(seq 1 60); do
-            curl -sf http://127.0.0.1:8799/api/project > /dev/null && break
+            if curl -sf http://127.0.0.1:8799/api/project > /dev/null; then ok=1; break; fi
             sleep 1
           done
-          curl -sf http://127.0.0.1:8799/api/project | head -c 200; echo
-          curl -sf http://127.0.0.1:8799/ | grep -q '<div id="root">'
-          kill %1 || true
+          sleep 5      # let the window finish starting, so a crash shows up
+          if [ $ok = 1 ] && curl -sf http://127.0.0.1:8799/ | grep -q '<div id="root">'; then
+            echo "app is serving the editor"
+            kill %1 || true
+            exit 0
+          fi
+          echo "--- app output ---"; cat "$LOG"
+          python tools/ci_annotate.py "App did not start" "$LOG"
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:
