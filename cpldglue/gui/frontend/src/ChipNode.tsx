@@ -4,6 +4,7 @@ import type { Part, PartPin } from "./types";
 import { CHIP_W, GUTTER, HEADER_H, NODE_W, ROW_H, chipHeight, pinSide } from "./layout";
 import { NetContext, type PinNet } from "./netContext";
 import { GateArt, artInfo } from "./GateArt";
+import { slotColor } from "./MacrocellBar";
 
 export type ChipData = { ref: string; part: Part };
 export type ChipNodeType = Node<ChipData, "chip">;
@@ -75,7 +76,8 @@ function PinRow({ refName, pin, part, hideName }: {
 
 function ChipNodeImpl({ data, selected }: NodeProps<ChipNodeType>) {
   const { ref, part } = data;
-  const { onChipMenu, unused, pinNet, selectedNet, netValues } = useContext(NetContext);
+  const { onChipMenu, unused, pinNet, selectedNet, netValues, macrocells } = useContext(NetContext);
+  const mc = macrocells[ref];
   const info = useMemo(() => artInfo(part), [part]);
   const wireClass = (num: string) => {
     const net = pinNet[`${ref}.${num}`];
@@ -95,6 +97,12 @@ function ChipNodeImpl({ data, selected }: NodeProps<ChipNodeType>) {
           <div className="chip-title">{part.title}</div>
         </div>
         {part.warning && <div className="chip-warn" title={part.warning}>!</div>}
+        {mc && (
+          <div className="chip-mc" title={`About ${mc.estimate} macrocells (see the bar in the report panel)`}>
+            <span className="mcbar-swatch" style={{ background: slotColor(mc.slot) }} />
+            ≈{Number.isInteger(mc.estimate) ? mc.estimate : mc.estimate.toFixed(1)} MC
+          </div>
+        )}
         {part.units?.length > 0 &&
           <GateArt refName={ref} part={part} unused={unused[ref] ?? []} wireClass={wireClass} />}
         {part.pins.map((p) => <PinRow key={p.number} refName={ref} pin={p} part={part}

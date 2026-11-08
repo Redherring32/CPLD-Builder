@@ -55,10 +55,18 @@ class Result:
     unused: Dict[str, List[int]] = field(default_factory=dict)
     # Macrocell estimate: (outputs, flip-flops/latches, device total or None).
     macrocells: Optional[Tuple[int, int, Optional[int]]] = None
+    # Per chip: ref -> (output pins it drives, flip-flop/latch bits). A pin
+    # shared by several 3-state drivers is split between them.
+    macrocell_parts: Dict[str, Tuple[float, int, int]] = field(default_factory=dict)
+    # Flip-flops/latches that drive an output pin on their own share that
+    # pin's macrocell; counted once.
+    macrocells_shared: int = 0
 
     @property
     def macrocell_estimate(self) -> Optional[int]:
-        return None if self.macrocells is None else self.macrocells[0] + self.macrocells[1]
+        if self.macrocells is None:
+            return None
+        return self.macrocells[0] + self.macrocells[1] - self.macrocells_shared
 
     @property
     def ok(self) -> bool:
@@ -77,9 +85,11 @@ class Result:
                f"Pins used: {len(self.ports)}"]
         if self.macrocells:
             outs, regs, total = self.macrocells
-            out.append(f"Macrocells: up to {outs + regs}"
+            shared = (f", {self.macrocells_shared} of them at their own pin"
+                      if self.macrocells_shared else "")
+            out.append(f"Macrocells: about {self.macrocell_estimate}"
                        + (f" of {total}" if total else "")
-                       + f" ({outs} output pin(s) + {regs} flip-flop/latch bit(s); "
+                       + f" ({outs} output pin(s) + {regs} flip-flop/latch bit(s){shared}; "
                          f"the fitter report has the real figure)")
         for p in sorted(self.ports, key=lambda p: self.pins.get(p.name, 999)):
             pin = self.pins.get(p.name, "?")
@@ -228,6 +238,8 @@ def generate(design: Design, assign: bool = True) -> Result:
     logic: List[str] = []
     net_value: Dict[str, str] = {}     # net name -> expression readers use
     driver_wires: Dict[Tuple[str, str], str] = {}  # (ref, port) -> wire name
+    port_drivers: Dict[str, List[str]] = {}        # output port -> driving chips
+    port_pins: Dict[str, List[Tuple[str, str]]] = {}  # output port -> (chip, pin name)
 
     def dwire(ref: str, port: str) -> str:
         w = names.take(f"{ref}_{port}")
@@ -288,6 +300,8 @@ def generate(design: Design, assign: bool = True) -> Result:
             if net.external:
                 port = names.take(sig)
                 r.ports.append(TopPort(port, "output", net.name))
+                port_drivers[port] = [n.ref]
+                port_pins[port] = [(n.ref, p.name)]
                 logic.append(f"    assign {port} = {src};")
             net_value[net.name] = src
         elif tri:
@@ -324,6 +338,8 @@ def generate(design: Design, assign: bool = True) -> Result:
                 port = names.take(sig)
                 drive = "oc" if all(p.kind == "oc" for _, p in tri) else "tri"
                 r.ports.append(TopPort(port, direction, net.name, drive))
+                port_drivers[port] = [n.ref for n, _ in tri]
+                port_pins[port] = [(n.ref, p.name) for n, p in tri]
                 logic.append(f"    assign {port} = {mux};")
                 net_value[net.name] = port
             else:
@@ -411,15 +427,30 @@ def generate(design: Design, assign: bool = True) -> Result:
     regs = sum(u.storage for ref, k in design.parts.items()
                for i, u in enumerate(UNITS[k]) if i not in r.unused.get(ref, []))
     r.macrocells = (outs, regs, dev.macrocells if dev else None)
-    if dev and outs + regs > dev.macrocells:
+    sole = {pins[0] for pins in port_pins.values() if len(pins) == 1}
+    per: Dict[str, List[float]] = {ref: [0.0, 0, 0] for ref in design.parts}
+    for ref, k in design.parts.items():
+        for i, u in enumerate(UNITS[k]):
+            if i in r.unused.get(ref, []) or not u.storage:
+                continue
+            per[ref][1] += u.storage
+            at_pins = sum(1 for o in u.outputs if (ref, o) in sole)
+            per[ref][2] += min(u.storage, at_pins)
+    for refs in port_drivers.values():
+        for ref in refs:
+            per[ref][0] += 1 / len(refs)
+    r.macrocell_parts = {ref: (round(o, 3), int(st), int(sh)) for ref, (o, st, sh) in per.items()}
+    r.macrocells_shared = sum(v[2] for v in r.macrocell_parts.values())
+    need = r.macrocell_estimate or 0
+    if dev and need > dev.macrocells:
         bigger = [n for n, d in devices.DEVICES.items()
-                  if d.macrocells >= outs + regs and d.vcc == dev.vcc
+                  if d.macrocells >= need and d.vcc == dev.vcc
                   and n == d.family + dev.name[7:]]
         r.warnings.append(
-            f"may not fit: up to {outs + regs} macrocells needed ({outs} outputs + "
-            f"{regs} flip-flops/latches), {dev.name} has {dev.macrocells}"
-            + (f"; try {bigger[0]}" if bigger else "") + ". Registers that drive a "
-            f"pin directly share its macrocell, so the fitter may still manage.")
+            f"may not fit: about {need} macrocells needed ({outs} outputs + "
+            f"{regs} flip-flops/latches - {r.macrocells_shared} at their own pin), "
+            f"{dev.name} has {dev.macrocells}"
+            + (f"; try {bigger[0]}" if bigger else "") + ". The fitter has the final word.")
     if dev and dev.vcc < 5:
         r.notes.append(f"{dev.name} runs from 3.3 V. Check the datasheet for 5 V "
                        f"input tolerance and output levels before using it on a "

@@ -75,7 +75,11 @@ def generate_payload(design: Design) -> dict:
         "capacity": capacity(design),
         "macrocells": None if r.macrocells is None else {
             "outputs": r.macrocells[0], "storage": r.macrocells[1],
-            "total": r.macrocells[2]},
+            "shared": r.macrocells_shared, "estimate": r.macrocell_estimate,
+            "total": r.macrocells[2],
+            "parts": {ref: {"outputs": o, "storage": st, "shared": sh,
+                            "estimate": round(o + st - sh, 3)}
+                      for ref, (o, st, sh) in r.macrocell_parts.items()}},
         "nets": nets,
         "unused": r.unused,
         "errors": r.errors,

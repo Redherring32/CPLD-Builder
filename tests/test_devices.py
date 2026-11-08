@@ -119,7 +119,7 @@ class TestGenerate(unittest.TestCase):
         r = generate.generate(d)
         self.assertEqual(r.errors, [])
         self.assertEqual(len(r.pins), 48)
-        self.assertIn("Macrocells: up to 24 of 64", r.report(d))
+        self.assertIn("Macrocells: about 24 of 64", r.report(d))
 
     def test_macrocell_warning_suggests_bigger_part(self):
         lines = ["device ATF1502AS PLCC44"]
@@ -133,7 +133,8 @@ class TestGenerate(unittest.TestCase):
         lines.append("net GND: " + " ".join(f"U{u}.13" for u in range(1, 6)))
         r = generate.generate(dsg.parse_text("\n".join(lines)))
         msg = " ".join(r.warnings)
-        self.assertIn("may not fit: up to 85 macrocells", msg)
+        # 5 x (16 bits + 1 output pin); each QA pin holds its own bit
+        self.assertIn("may not fit: about 80 macrocells", msg)
         self.assertIn("try ATF1508AS", msg)
 
     def test_3v3_note(self):
@@ -151,6 +152,10 @@ class TestGenerate(unittest.TestCase):
         self.assertEqual(r.errors, [])
         self.assertEqual(len(r.pins), 39)
         self.assertEqual(r.macrocells, (17, 8, 64))
+        # the 373's latches drive their own pins, so they share those macrocells
+        self.assertEqual(r.macrocell_estimate, 17)
+        self.assertEqual(r.macrocell_parts["U5"], (8, 8, 8))
+        self.assertAlmostEqual(sum(o + s - sh for o, s, sh in r.macrocell_parts.values()), 17)
 
 
 if __name__ == "__main__":

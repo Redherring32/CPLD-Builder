@@ -19,13 +19,14 @@ export interface NetCtx {
   selectedNet: string | null;
   netValues: Record<string, number | null> | null;   // live simulation values
   unused: Record<string, number[]>;  // ref -> unused gate indices (from the generator)
+  macrocells: Record<string, { estimate: number; slot: number }>;  // per chip
   select: (net: string | null) => void;
   onPinMenu: (e: MouseEvent, ref: string, pin: string) => void;
   onChipMenu: (e: MouseEvent, ref: string) => void;
 }
 
 export const NetContext = createContext<NetCtx>({
-  pinNet: {}, issues: {}, selectedNet: null, netValues: null, unused: {}, select: () => {},
+  pinNet: {}, issues: {}, selectedNet: null, netValues: null, unused: {}, macrocells: {}, select: () => {},
   onPinMenu: () => {}, onChipMenu: () => {},
 });
 

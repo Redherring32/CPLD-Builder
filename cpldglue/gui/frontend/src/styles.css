@@ -21,12 +21,21 @@
   --k-b: #db2777;
   --k-oc: #ea580c;
   --k-pwr: #9ca3af;
+  /* chip colors (validated categorical palette, fixed order) */
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
+  --series-other: #9aa1ad;
+  --track: #e6e9ef;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #14171d;
     --panel: #1b1f27;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    --series-other: #6b7383;
+    --track: #2c323d;
     --text: #e6e9ef;
     --muted: #8d95a5;
     --line: #2c323d;
@@ -381,3 +390,26 @@ table.keys td:first-child { white-space: nowrap; color: var(--accent); }
 .topbar select.recent { max-width: 90px; }
 
 .kicad-text { width: 100%; height: 260px; font-size: 11px; white-space: pre; }
+
+/* Macrocell usage bar (thin segmented bar: 8px, round ends, 2px surface gaps) */
+.mcbar { padding: 8px 10px 4px; border-bottom: 1px solid var(--line); }
+.mcbar-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+.mcbar-title { font-weight: 600; }
+.mcbar-value { font-variant-numeric: tabular-nums; }
+.mcbar-over { color: var(--error); font-weight: 600; }
+.mcbar-track { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden;
+  background: var(--panel); }
+.mcbar-seg, .mcbar-free { min-width: 2px; height: 100%; }
+.mcbar-free { background: var(--track); }
+.mcbar-track > :first-child { border-radius: 4px 0 0 4px; }
+.mcbar-track > :last-child { border-radius: 0 4px 4px 0; }
+.mcbar-track > :only-child { border-radius: 4px; }
+.mcbar-seg:hover, .mcbar-seg:focus-visible { filter: brightness(1.15); outline: none; }
+.mcbar-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.mcbar-table td { padding: 1px 4px; white-space: nowrap; }
+.mcbar-table td.num { text-align: right; font-variant-numeric: tabular-nums; width: 3em; }
+.mcbar-table td.why { white-space: normal; }
+.mcbar-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.mcbar-note { margin: 4px 0 2px; }
+.chip-mc { position: absolute; top: 6px; left: 8px; font-size: 10px; color: var(--chip-muted);
+  display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }

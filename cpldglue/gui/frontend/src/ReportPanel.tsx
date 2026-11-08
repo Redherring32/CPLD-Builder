@@ -1,3 +1,4 @@
+import { MacrocellBar } from "./MacrocellBar";
 import { useState } from "react";
 import type { Design, GenResult } from "./types";
 import { shortNetName } from "./netContext";
@@ -8,8 +9,8 @@ const TAB_NAMES: Record<Tab, string> = {
   report: "Report", verilog: "Verilog", pins: "Pin file", sim: "Simulate",
 };
 
-export function ReportPanel({ design, gen, genError, selectedNet, onSelectNet, onSimNets }: {
-  design: Design; gen: GenResult | null; genError: string;
+export function ReportPanel({ design, gen, genError, slots, selectedNet, onSelectNet, onSimNets }: {
+  design: Design; gen: GenResult | null; genError: string; slots: Record<string, number>;
   selectedNet: string | null; onSelectNet: (n: string | null) => void;
   onSimNets: (nets: Record<string, number | null> | null) => void;
 }) {
@@ -35,6 +36,7 @@ export function ReportPanel({ design, gen, genError, selectedNet, onSelectNet, o
         )}
       </div>
 
+      <MacrocellBar design={design} gen={gen} slots={slots} />
       <div className="report-body">
         {genError && <div className="msg error">{genError}</div>}
         {!gen && !genError && <div className="muted">Generating…</div>}

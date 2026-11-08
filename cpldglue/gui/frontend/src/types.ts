@@ -95,7 +95,12 @@ export interface GenResult {
   ok: boolean;
   ports: GenPort[];
   capacity: number | null;
-  macrocells?: { outputs: number; storage: number; total: number | null } | null;
+  macrocells?: {
+    outputs: number; storage: number; shared: number; estimate: number; total: number | null;
+    // per chip: output pins it drives (shared buses split), flip-flops, and
+    // flip-flops that sit at their own pin
+    parts: Record<string, { outputs: number; storage: number; shared: number; estimate: number }>;
+  } | null;
   nets: Record<string, GenNet>;
   unused?: Record<string, number[]>;     // ref -> indices of unused units
   errors: string[];

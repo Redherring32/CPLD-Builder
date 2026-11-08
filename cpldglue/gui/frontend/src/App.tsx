@@ -20,6 +20,7 @@ import { PinoutView } from "./PinoutView";
 import { ImportDialog } from "./ImportDialog";
 import { BuildDialog } from "./BuildDialog";
 import { SetupDialog } from "./SetupDialog";
+import { chipSlots } from "./MacrocellBar";
 
 const nodeTypes: NodeTypes = { chip: ChipNode };
 const POLL_MS = 2000;
@@ -365,9 +366,23 @@ function Editor() {
     };
   };
 
+  // Chip colors persist for the session (see chipSlots).
+  const slotMemo = useRef<Record<string, number>>({});
+  const slots = useMemo(() => {
+    const s = chipSlots(design, slotMemo.current);
+    slotMemo.current = s;
+    return s;
+  }, [design]);
+  const chipMacrocells = useMemo(() => {
+    const parts = gen?.macrocells?.parts ?? {};
+    return Object.fromEntries(Object.entries(parts).map(([ref, v]) =>
+      [ref, { estimate: v.estimate, slot: slots[ref] ?? 0 }]));
+  }, [gen, slots]);
+
   const netCtx = useMemo(() => ({
     pinNet, issues, selectedNet, select: setSelectedNet, netValues: simNets,
     unused: gen?.unused ?? {},
+    macrocells: chipMacrocells,
     onPinMenu: (e: ReactMouseEvent, ref: string, pin: string) => {
       e.preventDefault(); e.stopPropagation();
       setMenu({ kind: "pin", x: e.clientX, y: e.clientY, ref, pin });
@@ -376,7 +391,7 @@ function Editor() {
       e.preventDefault(); e.stopPropagation();
       setMenu({ kind: "chip", x: e.clientX, y: e.clientY, ref });
     },
-  }), [pinNet, issues, selectedNet, simNets, gen?.unused]);
+  }), [pinNet, issues, selectedNet, simNets, gen?.unused, chipMacrocells]);
 
   const deviceNames = [...new Set(devices.map((d) => d.device))];
   const packages = devices.filter((d) => d.device === design.device).map((d) => d.package);
@@ -550,7 +565,7 @@ function Editor() {
             {flash && <div className="flash" role="status">{flash}</div>}
           </div>
         )}
-        <ReportPanel design={design} gen={gen} genError={genError}
+        <ReportPanel design={design} gen={gen} genError={genError} slots={slots}
                      selectedNet={selectedNet} onSelectNet={setSelectedNet}
                      onSimNets={setSimNets} />
       </main>

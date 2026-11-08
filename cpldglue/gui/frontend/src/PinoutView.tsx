@@ -220,9 +220,9 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
           </span>
           {gen?.macrocells && (
             <span className={`pincount${gen.macrocells.total !== null &&
-                    gen.macrocells.outputs + gen.macrocells.storage > gen.macrocells.total ? " over" : ""}`}
-                  title={`Estimate: ${gen.macrocells.outputs} outputs + ${gen.macrocells.storage} flip-flops/latches. The fitter report has the real figure.`}>
-              ≤{gen.macrocells.outputs + gen.macrocells.storage}
+                    gen.macrocells.estimate > gen.macrocells.total ? " over" : ""}`}
+                  title="Estimate; the per-chip breakdown is in the report panel. The fitter report has the real figure.">
+              ≈{gen.macrocells.estimate}
               {gen.macrocells.total !== null ? ` / ${gen.macrocells.total}` : ""} macrocells
             </span>
           )}

@@ -89,6 +89,12 @@ pre-built into `cpldglue/gui/static/` and served from 127.0.0.1.
   labels join the nets of the same name. The symbol uses the package's
   standard KiCad footprint. If the clipboard is blocked, a box shows the
   text to copy by hand.
+- **Macrocell bar** (top of the report panel). How much of the device the
+  design uses, split by chip, with a list of what each chip costs: one
+  macrocell per output pin it drives (bus pins shared between chips are split)
+  plus one per flip-flop or latch that doesn't sit at its own pin. Each chip
+  in the chip view shows its share too. It's an estimate; the fitter report has
+  the real figure.
 - **Report / Verilog / Pin file tabs.** The same output as the command
   line, updated on every edit.
 - **Simulate tab.** Switches for inputs, lights for outputs (Z = released

@@ -140,6 +140,8 @@ class TestRules(unittest.TestCase):
         self.assertEqual(r.unused, {"U1": [1, 2], "U2": [1]})
         self.assertEqual(sorted(p.name for p in r.ports), ["A", "C", "CLK", "D", "Q", "Y"])
         self.assertEqual(r.macrocells, (2, 1, 32))
+        self.assertEqual(r.macrocell_estimate, 2)          # the flip-flop sits at Q
+        self.assertEqual(r.macrocell_parts, {"U1": (1, 0, 0), "U2": (1, 1, 1)})
         text = " ".join(r.notes)
         self.assertIn("U1 (74x32): gates 2 and 3 unused", text)
         self.assertIn("U2 (74x74): flip-flop 2 unused", text)
