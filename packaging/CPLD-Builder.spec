@@ -30,6 +30,10 @@ hidden = [
 ]
 if sys.platform == "win32":
     hidden += ["ctypes.wintypes"]
+else:
+    # PyInstaller's pkg_resources start-up hook imports these (Qt pulls in
+    # pkg_resources on Linux); see requirements-build.txt.
+    hidden += ["jaraco.text", "jaraco.functools", "jaraco.context"]
 
 common = dict(pathex=[str(ROOT)], datas=datas, hiddenimports=hidden,
               excludes=["tkinter", "unittest", "pydoc", "test"])

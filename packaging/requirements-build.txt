@@ -3,3 +3,8 @@ pyinstaller==6.11.1
 pywebview==5.4 ; sys_platform == "win32"
 # Linux: the window uses Qt WebEngine (bundles into the app; ~150 MB larger).
 pywebview[qt]==5.4 ; sys_platform == "linux"
+# pkg_resources (pulled in on Linux by the Qt stack) needs these at start-up
+# in a PyInstaller bundle; recent setuptools only vendors them privately.
+jaraco.text ; sys_platform == "linux"
+jaraco.functools ; sys_platform == "linux"
+jaraco.context ; sys_platform == "linux"
