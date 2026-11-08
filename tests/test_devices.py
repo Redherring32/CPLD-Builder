@@ -15,6 +15,9 @@ from cpldglue import design as dsg, devices, generate, yosys     # noqa: E402
 
 SCH = ROOT.parent / "Hardware" / "Motherboard" / "TinyTendo-schematic.kicad_sch"
 
+# GreenPAKs have their own checks in test_greenpak.py
+ATF = {n: d for n, d in devices.DEVICES.items() if d.kind == "cpld"}
+
 EXPECTED = {   # family -> (macrocells, {package: I/O pins incl. JTAG})
     "ATF1502": (32, {"PLCC44": 32, "TQFP44": 32}),
     "ATF1504": (64, {"PLCC44": 32, "TQFP44": 32, "PLCC68": 48, "PLCC84": 64,
@@ -25,11 +28,11 @@ EXPECTED = {   # family -> (macrocells, {package: I/O pins incl. JTAG})
 
 class TestTables(unittest.TestCase):
     def test_family_and_variants(self):
-        self.assertEqual(set(devices.DEVICES), {
+        self.assertEqual(set(ATF), {
             "ATF1502AS", "ATF1502ASL", "ATF1502ASV",
             "ATF1504AS", "ATF1504ASL", "ATF1504ASV", "ATF1504ASVL",
             "ATF1508AS", "ATF1508ASL", "ATF1508ASV", "ATF1508ASVL"})
-        for name, dev in devices.DEVICES.items():
+        for name, dev in ATF.items():
             with self.subTest(device=name):
                 mc, pkgs = EXPECTED[dev.family]
                 self.assertEqual(dev.macrocells, mc)
@@ -37,7 +40,7 @@ class TestTables(unittest.TestCase):
                 self.assertEqual(dev.vcc, 3.3 if "ASV" in name else 5.0)
 
     def test_every_pin_accounted_for(self):
-        for name, dev in devices.DEVICES.items():
+        for name, dev in ATF.items():
             for pkg in dev.packages.values():
                 with self.subTest(device=name, package=pkg.name):
                     total = int("".join(c for c in pkg.name if c.isdigit()))
@@ -79,7 +82,7 @@ class TestTables(unittest.TestCase):
         self.assertEqual(q.inputs, {"GCLK1": 139, "OE1": 140, "GCLR": 141, "GCLK2/OE2": 142})
 
     def test_assign_fills_every_package(self):
-        for name, dev in devices.DEVICES.items():
+        for name, dev in ATF.items():
             for pkg in dev.packages.values():
                 with self.subTest(device=name, package=pkg.name):
                     n = len(pkg.io) - 4 + 4      # I/O minus JTAG, plus input-only

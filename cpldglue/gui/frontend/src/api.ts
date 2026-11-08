@@ -70,7 +70,11 @@ export async function simStep(steps: Record<string, number | null>[]): Promise<S
 }
 
 // ---- KiCad import ----
-export interface KiComponent { ref: string; value: string; part: string | null }
+export interface KiComponent {
+  ref: string; value: string; part: string | null;
+  alternatives?: string[];       // chips driving the same nets: fit one or the other
+}
+export interface KiAlternatives { refs: string[]; nets: string[] }
 export interface KiPreview {
   pins: number; capacity: number | null; errors: string[]; warnings: string[]; design: Design;
 }
@@ -90,12 +94,13 @@ export async function kicadFind(): Promise<string[]> {
 }
 
 export function kicadComponents(path: string) {
-  return post<{ path: string; components: KiComponent[] }>("api/kicad/components", { path });
+  return post<{ path: string; components: KiComponent[]; alternatives?: KiAlternatives[] }>(
+    "api/kicad/components", { path });
 }
 
 export function kicadPreview(path: string, refs: string[], overrides: Record<string, string>,
-                             design: Design) {
-  return post<KiPreview>("api/kicad/preview", { path, refs, overrides, design });
+                             design: Design, variants?: Record<string, string[]>) {
+  return post<KiPreview>("api/kicad/preview", { path, refs, overrides, design, variants });
 }
 
 // ---- Build ----
@@ -151,6 +156,15 @@ export function setTitle(t: string) {
 // The desktop bridge appears a moment after the page loads.
 if (typeof window !== "undefined")
   window.addEventListener("pywebviewready", () => { if (lastTitle) setTitle(lastTitle); });
+
+export interface GreenPakResult {
+  ok: boolean; error?: string; fits: boolean; notes: string[]; unplaced: string[];
+  cells: { type: string; title: string; used: number; total: number }[];
+  luts: number; flops: number; oe: number; sheet: string;
+}
+export function greenpak(design: Design) {
+  return post<GreenPakResult>("api/greenpak", { design });
+}
 
 export interface KicadSymbol { name: string; clipboard: string; library: string; warnings: string[]; labels: number }
 export function kicadSymbol(design: Design) {

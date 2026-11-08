@@ -406,6 +406,30 @@ class TestFixtures(unittest.TestCase):
                          "refresh it: save GET /api/parts to that file")
 
 
+class TestAlternatives(unittest.TestCase):
+    """Boards with "populate one of" chips (e.g. a 74x377 or two 74x161s in
+    the MouseBite Labs discrete-mapper cartridge) have several chips driving
+    the same nets; the import dialog should treat them as alternatives."""
+
+    def test_chips_driving_the_same_nets_are_grouped(self):
+        N = dsg.Node
+        comps = {"U4A": "74LS377", "U4B": "74LS161", "U4C": "74LS161", "U5": "74LS32",
+                 "U9": "74HC125", "U10": "74HC125"}
+        nets = {
+            "/Q_{0}": [N("U4A", "6"), N("U4B", "14"), N("U4C", "14"), N("U5", "13")],
+            "/Q_{3}": [N("U4A", "16"), N("U4B", "11")],
+            "/OUT": [N("U5", "3")],
+            # two 3-state buffers sharing a bus are normal, not alternatives
+            "/BUS": [N("U9", "3"), N("U10", "3")],
+        }
+        groups = api.alternatives(comps, nets)
+        self.assertEqual(groups, [{"refs": ["U4A", "U4B", "U4C"], "nets": ["Q_{0}", "Q_{3}"]}])
+
+    def test_kicad_escapes_in_names(self):
+        self.assertEqual(generate.sanitize("/R{slash}~{W}"), "R_W_n")
+        self.assertEqual(generate.sanitize("/Q_{0U}"), "Q_0U")
+
+
 class TestBind(unittest.TestCase):
     def test_busy_port_moves_to_next(self):
         from http.server import BaseHTTPRequestHandler

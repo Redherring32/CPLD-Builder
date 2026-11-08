@@ -26,6 +26,7 @@ from typing import Optional
 from . import deps
 
 CLI_COMMANDS = {"parts", "devices", "kicad", "gen", "build", "gui", "setup", "kicad-symbol",
+                "greenpak",
                 "_yosys"}
 
 

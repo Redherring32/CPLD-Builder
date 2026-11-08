@@ -61,6 +61,11 @@ class Result:
     # Flip-flops/latches that drive an output pin on their own share that
     # pin's macrocell; counted once.
     macrocells_shared: int = 0
+    # Variants: the variant this result is for (build mode), all variant
+    # names, and (pins mode) each variant's VAR_SEL code, VAR_SEL0 first.
+    variant: str = ""
+    variants: List[str] = field(default_factory=list)
+    select_codes: Dict[str, str] = field(default_factory=dict)
 
     @property
     def macrocell_estimate(self) -> Optional[int]:
@@ -83,6 +88,12 @@ class Result:
         out = [f"Design {design.name}: {len(design.parts)} chip(s) -> "
                f"{design.device} {design.package}",
                f"Pins used: {len(self.ports)}"]
+        if self.select_codes:
+            sel = sorted({p.name for p in self.ports if p.name.startswith("VAR_SEL")}, reverse=True)
+            out.append(f"Variants, chosen by {' '.join(sel)}: " + ", ".join(
+                f"{v} = {code[::-1]}" for v, code in self.select_codes.items()))
+        elif self.variant:
+            out.append(f"Variant: {self.variant} (of {', '.join(self.variants)})")
         if self.macrocells:
             outs, regs, total = self.macrocells
             shared = (f", {self.macrocells_shared} of them at their own pin"
@@ -105,6 +116,9 @@ class Result:
 
 def sanitize(name: str) -> str:
     s = name.lstrip("/")
+    # KiCad escapes characters it uses itself: R{slash}~{W} is the label R/~{W}
+    s = re.sub(r"\{(slash|backslash|colon|comma|space|tab|return|lt|gt|quote|dblquote|"
+               r"brace|lbrace|rbrace|pipe|caret|tilde)\}", "_", s)
     neg = "~{" in s or s.startswith("~")
     s = re.sub(r"~\{([^}]*)\}", r"\1", s).lstrip("~")
     s = re.sub(r"[^A-Za-z0-9_]", "_", s)
@@ -178,7 +192,30 @@ def _live_units(design: Design, pin_net: Dict[Tuple[str, str], Net]) -> Dict[str
     return live
 
 
+def _generate_variant(design: Design, assign: bool) -> Result:
+    """Build mode: the active variant on its own, with pins chosen so that
+    every variant puts each signal on the same pin (one board, one socket)."""
+    name = design.active_variant()
+    shared = Design.from_json(design.to_json())
+    shared.variant_mode = "pins"
+    rs = generate(shared, assign=True)
+    v = design.for_variant(name)
+    if rs.ok:
+        v.pin_locks = {sig: pin for sig, pin in rs.pins.items() if not sig.startswith("VAR_SEL")}
+        how = "each signal is on the same pin in every variant"
+    else:
+        how = ("the variants together don't fit, so pins were placed per variant and "
+               "may differ between them")
+    r = generate(v, assign)
+    r.variant, r.variants = name, list(design.variants)
+    r.notes.insert(0, f"Variant {name} of {len(design.variants)} "
+                      f"({', '.join(design.variants)}); {how}.")
+    return r
+
+
 def generate(design: Design, assign: bool = True) -> Result:
+    if design.variants and design.variant_mode != "pins":
+        return _generate_variant(design, assign)
     r = Result()
     names = _Names()
     lib = chips.LIBRARY
@@ -247,15 +284,49 @@ def generate(design: Design, assign: bool = True) -> Result:
         decls.append(f"    wire {w};")
         return w
 
+    # Pins mode: VAR_SEL inputs choose the variant; an optional chip's
+    # outputs drive only while a variant that fits it is selected.
+    optional = {ref: vs for ref, vs in design.optional_refs().items()
+                if ref in design.parts} if design.variants else {}
+    vnames = list(design.variants) if optional else []
+    active: Dict[str, str] = {}                       # optional chip -> enable expression
+    if optional:
+        nsel = max(1, (len(vnames) - 1).bit_length())
+        sel = [names.take(f"VAR_SEL{i}") for i in range(nsel)]
+        for sp in sel:
+            r.ports.append(TopPort(sp, "input", sp))
+        vwire = {}
+        for i, v in enumerate(vnames):
+            w = names.take("var_" + sanitize(v))
+            bits = " & ".join(sp if i >> k & 1 else f"~{sp}" for k, sp in enumerate(sel))
+            decls.append(f"    wire {w};")
+            logic.append(f"    assign {w} = {bits};   // variant {v}")
+            vwire[v] = w
+            r.select_codes[v] = "".join(str(i >> k & 1) for k in range(nsel))
+        for ref, vs in optional.items():
+            active[ref] = "(" + " | ".join(vwire[v] for v in vs) + ")" if len(vs) > 1 \
+                else vwire[vs[0]]
+        r.variants = vnames
+
     for net in design.nets.values():
         every = [(n, lib[design.parts[n.ref]].pins[n.pin]) for n in net.nodes]
         every = [(n, p) for n, p in every if not p.is_power]
         # Wiring mistakes are reported even when the gates involved are unused.
         drv_all = [(n, p) for n, p in every if p.kind in ("o", "t", "oc", "b")]
-        if net.const is None and any(p.kind == "o" for _, p in drv_all) and len(drv_all) > 1:
-            who = ", ".join(f"{n.ref}.{n.pin}" for n, _ in drv_all)
+        clash = None
+        if net.const is None:
+            for v in (vnames or [None]):                # each variant on its own
+                here = [(n, p) for n, p in drv_all
+                        if n.ref not in optional or v in optional[n.ref]]
+                if any(p.kind == "o" for _, p in here) and len(here) > 1:
+                    clash = (v, here)
+                    break
+        if clash:
+            v, here = clash
+            who = ", ".join(f"{n.ref}.{n.pin}" for n, _ in here)
             r.errors.append(f"net {net.name}: more than one driver and at least "
-                            f"one is not 3-state ({who})")
+                            f"one is not 3-state ({who})"
+                            + (f" in variant {v}" if v else ""))
             continue
         kinds = [(n, p) for n, p in every if pin_live(n.ref, n.pin)]
         if net.const is not None:
@@ -269,8 +340,11 @@ def generate(design: Design, assign: bool = True) -> Result:
                                     f"net {net.name}")
             continue
 
-        plain = [(n, p) for n, p in kinds if p.kind == "o"]
-        tri = [(n, p) for n, p in kinds if p.kind in ("t", "oc", "b")]
+        # An optional chip's push-pull output acts as a 3-state driver,
+        # enabled while its variant is selected.
+        plain = [(n, p) for n, p in kinds if p.kind == "o" and n.ref not in optional]
+        tri = [(n, p) for n, p in kinds
+               if p.kind in ("t", "oc", "b") or (p.kind == "o" and n.ref in optional)]
         loads = [(n, p) for n, p in kinds if p.kind in ("i", "b")]
         has_bidir = any(p.kind == "b" for _, p in kinds)
         if not kinds:
@@ -307,6 +381,10 @@ def generate(design: Design, assign: bool = True) -> Result:
         elif tri:
             datas, oes = [], []
             for n, p in tri:
+                if p.kind == "o":                     # optional chip, push-pull
+                    datas.append(dwire(n.ref, p.name))
+                    oes.append(active[n.ref])
+                    continue
                 if p.kind == "t":
                     datas.append(dwire(n.ref, p.name))
                     oes.append(dwire(n.ref, p.name + "_oe"))
@@ -317,7 +395,14 @@ def generate(design: Design, assign: bool = True) -> Result:
                     w = dwire(n.ref, p.name)
                     datas.append("1'b0")
                     oes.append(f"~{w}")
-            if len(tri) > 1:
+                if n.ref in active:                   # only in its variants
+                    oes[-1] = f"({oes[-1]} & {active[n.ref]})"
+            by_variant = [n.ref for n, _ in tri if n.ref in active]
+            if by_variant and len(tri) > 1:
+                r.notes.append(f"net {net.name}: driven by "
+                               f"{' / '.join(f'{n.ref}.{n.pin}' for n, _ in tri)}, "
+                               f"chosen by the variant (VAR_SEL)")
+            elif len(tri) > 1:
                 r.notes.append(f"net {net.name}: {len(tri)} 3-state drivers merged "
                                f"into a mux (first enabled wins: "
                                f"{', '.join(f'{n.ref}.{n.pin}' for n, _ in tri)})")
@@ -413,9 +498,13 @@ def generate(design: Design, assign: bool = True) -> Result:
     # ---- pins ----------------------------------------------------------------
     if assign:
         try:
+            locks = design.pin_locks
+            if design.variant_of:          # locks for other variants' signals don't apply
+                here = {p.name for p in r.ports}
+                locks = {sig: pin for sig, pin in locks.items() if sig in here}
             pr = devices.assign_pins(design.device, design.package,
-                                     [(p.name, p.direction) for p in r.ports],
-                                     design.pin_locks, design.keep_jtag)
+                                     [(p.name, p.direction, p.drive) for p in r.ports],
+                                     locks, design.keep_jtag)
             r.pins = pr.pins
             r.errors += pr.errors
         except ValueError as e:
@@ -423,6 +512,12 @@ def generate(design: Design, assign: bool = True) -> Result:
 
     # ---- capacity / device notes --------------------------------------------
     dev = devices.DEVICES.get(design.device.upper())
+    is_gp = bool(dev and dev.kind == "greenpak")
+    if is_gp:
+        r.notes.append(f"{dev.name} is a GreenPAK: size the logic with the LUT "
+                       f"check (needs Yosys) and enter it in Renesas Go Configure "
+                       f"from the LUT sheet; {dev.note}.")
+        dev = None                 # no macrocell estimate for GreenPAKs
     outs = sum(1 for p in r.ports if p.direction != "input")
     regs = sum(u.storage for ref, k in design.parts.items()
                for i, u in enumerate(UNITS[k]) if i not in r.unused.get(ref, []))
@@ -451,6 +546,8 @@ def generate(design: Design, assign: bool = True) -> Result:
             f"{regs} flip-flops/latches - {r.macrocells_shared} at their own pin), "
             f"{dev.name} has {dev.macrocells}"
             + (f"; try {bigger[0]}" if bigger else "") + ". The fitter has the final word.")
+    if is_gp:                      # macrocells don't apply; see greenpak.py
+        r.macrocells, r.macrocell_parts, r.macrocells_shared = None, {}, 0
     if dev and dev.vcc < 5:
         r.notes.append(f"{dev.name} runs from 3.3 V. Check the datasheet for 5 V "
                        f"input tolerance and output levels before using it on a "

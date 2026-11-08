@@ -3,8 +3,9 @@ import * as api from "./api";
 import type { BuildConfig } from "./api";
 import type { Design } from "./types";
 
-export function BuildDialog({ design, config, onClose, onSetup }: {
+export function BuildDialog({ design, config, onClose, onSetup, greenpak = false }: {
   design: Design; config: BuildConfig; onClose: () => void; onSetup: () => void;
+  greenpak?: boolean;
 }) {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; log: string } | null>(null);
@@ -29,23 +30,30 @@ export function BuildDialog({ design, config, onClose, onSetup }: {
           <h2>Build {design.name} for {design.device} {design.package}</h2>
           <button className="iconbtn" onClick={onClose} aria-label="Close" disabled={running}>×</button>
         </div>
+        {greenpak ? (
+          <p className="small">GreenPAKs can't be built automatically: there is no open tool
+            chain for them. Use <b>LUT sheet…</b> in the report panel to enter the design in
+            Renesas Go Configure, which programs the chip. The Verilog and pin file tabs show
+            the same design.</p>
+        ) : <>
         <ul className="small build-cfg">
           <li>Yosys flow: <span className="mono">{config.flow_dir ?? "not downloaded"}</span>
             {config.flow_dir && !config.flow_ok && <b className="err"> (cells.lib / techmap.v missing)</b>}</li>
           <li>Fitter: <span className="mono">{config.fitter ?? "not found — the build stops at the EDIF netlist"}</span></li>
           <li className="muted">Output goes to a <span className="mono">build/</span> folder next to the project file.</li>
         </ul>
-        {result && (
+        {result && !greenpak && (
           <pre className={`code buildlog ${result.ok ? "ok" : "bad"}`} data-testid="buildlog">{result.log}</pre>
         )}
+        </>}
         <div className="modal-foot">
-          {(!config.flow_dir || !config.fitter) &&
+          {!greenpak && (!config.flow_dir || !config.fitter) &&
             <button onClick={onSetup} disabled={running}>Get missing tools…</button>}
           <span className="spacer" />
           <button onClick={onClose} disabled={running}>Close</button>
-          <button className="primary" onClick={go} disabled={running || !config.flow_dir}>
+          {!greenpak && <button className="primary" onClick={go} disabled={running || !config.flow_dir}>
             {running ? "Building…" : result ? "Build again" : "Build"}
-          </button>
+          </button>}
         </div>
       </div>
     </div>

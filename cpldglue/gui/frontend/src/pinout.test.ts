@@ -44,6 +44,22 @@ describe("placePin", () => {
     expect(placePin("PLCC84", 84, 84)).toEqual({ side: "top", idx: 11 });   // right of pin 1
   });
 
+  it("lays out uneven sides (GreenPAK STQFN-20 and TSSOP-20)", () => {
+    // STQFN-20: 6 down the left, 4 along the bottom, 6 up the right, 4 back along the top
+    const s: [number, number, number, number] = [6, 4, 6, 4];
+    expect(placePin("STQFN20", 1, 20, s)).toEqual({ side: "left", idx: 0 });
+    expect(placePin("STQFN20", 7, 20, s)).toEqual({ side: "bottom", idx: 0 });
+    expect(placePin("STQFN20", 11, 20, s)).toEqual({ side: "right", idx: 5 });
+    expect(placePin("STQFN20", 16, 20, s)).toEqual({ side: "right", idx: 0 });
+    expect(placePin("STQFN20", 17, 20, s)).toEqual({ side: "top", idx: 3 });
+    expect(placePin("STQFN20", 20, 20, s)).toEqual({ side: "top", idx: 0 });
+    // TSSOP-20: 1-10 down the left, 11-20 up the right
+    const t: [number, number, number, number] = [10, 0, 10, 0];
+    expect(placePin("TSSOP20", 10, 20, t)).toEqual({ side: "left", idx: 9 });
+    expect(placePin("TSSOP20", 11, 20, t)).toEqual({ side: "right", idx: 9 });
+    expect(placePin("TSSOP20", 20, 20, t)).toEqual({ side: "right", idx: 0 });
+  });
+
   it("numbers PQFP160 from the top of the left edge", () => {
     expect(placePin("PQFP160", 1, 160)).toEqual({ side: "left", idx: 0 });
     expect(placePin("PQFP160", 41, 160)).toEqual({ side: "bottom", idx: 0 });

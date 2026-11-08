@@ -20,18 +20,21 @@ export interface NetCtx {
   netValues: Record<string, number | null> | null;   // live simulation values
   unused: Record<string, number[]>;  // ref -> unused gate indices (from the generator)
   macrocells: Record<string, { estimate: number; slot: number }>;  // per chip
+  // optional chips (variants): which variants fit them, and whether the
+  // variant being viewed leaves them out
+  variantTags: Record<string, { label: string; inactive: boolean }>;
   select: (net: string | null) => void;
   onPinMenu: (e: MouseEvent, ref: string, pin: string) => void;
   onChipMenu: (e: MouseEvent, ref: string) => void;
 }
 
 export const NetContext = createContext<NetCtx>({
-  pinNet: {}, issues: {}, selectedNet: null, netValues: null, unused: {}, macrocells: {}, select: () => {},
+  pinNet: {}, issues: {}, selectedNet: null, netValues: null, unused: {}, macrocells: {}, variantTags: {}, select: () => {},
   onPinMenu: () => {}, onChipMenu: () => {},
 });
 
 export function shortNetName(name: string): string {
-  return name.replace(/^\//, "").replace(/~\{([^}]*)\}/g, "/$1");
+  return name.replace(/^\//, "").replace(/\{slash\}/g, "∕").replace(/~\{([^}]*)\}/g, "/$1");
 }
 
 /** Pull "U7.12"-style pin references out of report messages. */

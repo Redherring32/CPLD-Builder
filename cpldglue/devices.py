@@ -1,7 +1,12 @@
-"""ATF15xx devices, packages and pin assignment.
+"""Target devices, their packages, and pin assignment.
 
-Pin tables are generated from Atmel's BSDL files (see pintables.py and
+ATF15xx CPLDs: pin tables generated from Atmel's BSDL files (pintables.py,
 tools/bsdl_to_pins.py), so they include every package's VCC/GND pins.
+
+GreenPAK (Renesas SLG466xx): pin tables and logic resources typed in from
+the Renesas datasheets (SLG46826 rev 3.25, SLG46620 rev 1.22). These are
+design-and-check targets: there is no open flow to program them, so the
+tool sizes the design in LUTs/DFFs and prints a sheet for Go Configure.
 """
 from __future__ import annotations
 
@@ -20,6 +25,24 @@ class Package:
     power: Dict[int, str] = field(default_factory=dict)   # pin -> VCC/GND
     pin_count: int = 44
     nc: List[int] = field(default_factory=list)            # no-connect pins
+    # Pin capabilities (all subsets of io). Empty for the ATF parts, where
+    # every I/O can be an input, output, 3-state or bidirectional pin.
+    out_only: List[int] = field(default_factory=list)      # outputs only
+    no_oe: List[int] = field(default_factory=list)         # no output enable
+    reserved: Dict[str, int] = field(default_factory=dict) # e.g. I2C SCL/SDA
+    pin_names: Dict[int, str] = field(default_factory=dict)  # datasheet names
+    # Drawing: "plcc" (pin 1 mid-top) or "qfn" (pin 1 top-left, CCW), and
+    # pins per side (left, bottom, right, top); None = square.
+    style: str = ""
+    sides: Optional[Tuple[int, int, int, int]] = None
+    footprint: str = ""                                    # KiCad footprint
+
+    @property
+    def restricted(self) -> bool:
+        return bool(self.out_only or self.no_oe)
+
+    def oe_pins(self) -> List[int]:
+        return [p for p in self.io if p not in self.no_oe and p not in self.out_only]
 
 
 @dataclass
@@ -29,10 +52,16 @@ class Device:
     packages: Dict[str, Package]
     vcc: float = 5.0
     fitter_tech: str = ""       # -tech name the Microchip fitter accepts
+    kind: str = "cpld"          # "cpld" (ATF15xx) or "greenpak"
+    # GreenPAK logic cells: slot type -> count. A slot type names what a cell
+    # can be: "lut3_dff" is a 3-bit LUT or a DFF/latch.
+    resources: Dict[str, int] = field(default_factory=dict)
+    supply: str = ""            # supply range, for the device list
+    note: str = ""
 
     @property
-    def family(self) -> str:    # ATF1502 / ATF1504 / ATF1508
-        return self.name[:7]
+    def family(self) -> str:    # ATF1502 / ATF1504 / ATF1508, or the GreenPAK part
+        return self.name if self.kind == "greenpak" else self.name[:7]
 
 
 # Packages per family, from the Microchip datasheets / BSDL set.
@@ -70,6 +99,68 @@ def _build() -> Dict[str, Device]:
 DEVICES: Dict[str, Device] = _build()
 
 
+# ---- GreenPAK ---------------------------------------------------------------
+def _gp_package(name: str, pins: Dict[int, str], out_only, no_oe, reserved,
+                sides, footprint) -> Package:
+    io = sorted(n for n, nm in pins.items() if nm.startswith(("IO", "PIN")))
+    power = {n: ("GND" if nm == "GND" else "VCC") for n, nm in pins.items()
+             if nm in ("VDD", "VDD2", "GND")}
+    inputs = {nm: n for n, nm in pins.items() if nm == "GPI"}
+    by_name = {nm: n for n, nm in pins.items()}
+    return Package(name, io, inputs, {}, power, len(pins), [],
+                   [by_name[x] for x in out_only], [by_name[x] for x in no_oe],
+                   {r: by_name[r] for r in reserved}, dict(pins), "qfn", sides, footprint)
+
+
+_STQFN = "Package_DFN_QFN:Renesas_UQFN-20_2x3mm_P0.4mm_LayoutBorder4x6y"
+_TSSOP = "Package_SO:TSSOP-20_4.4x6.5mm_P0.65mm"
+
+# SLG46826 (datasheet rev 3.25, section 2): IO6/IO7 are outputs only;
+# IO0/IO2/IO3 have no output enable; SCL/SDA are the I2C (and in-system
+# programming) pins. Pin numbers differ between the two packages.
+_SLG46826_STQFN = {1: "VDD", 2: "IO0", 3: "IO1", 4: "IO2", 5: "IO3", 6: "IO4", 7: "IO5",
+                   8: "SCL", 9: "SDA", 10: "IO6", 11: "GND", 12: "IO7", 13: "IO8",
+                   14: "VDD2", 15: "IO9", 16: "IO10", 17: "IO11", 18: "IO12",
+                   19: "IO13", 20: "IO14"}
+_SLG46826_TSSOP = {1: "IO14", 2: "IO13", 3: "IO12", 4: "IO11", 5: "IO10", 6: "IO9",
+                   7: "VDD2", 8: "IO8", 9: "IO7", 10: "GND", 11: "IO6", 12: "SDA",
+                   13: "SCL", 14: "IO5", 15: "IO4", 16: "IO3", 17: "IO2", 18: "IO1",
+                   19: "IO0", 20: "VDD"}
+_SLG46826 = dict(out_only=["IO6", "IO7"], no_oe=["IO0", "IO2", "IO3"],
+                 reserved=["SCL", "SDA"])
+
+# SLG46620 (datasheet rev 1.22, section 2.1): same numbering in both
+# packages; pin 2 is input only; pins without "with OE" can't be 3-state.
+_SLG46620_PINS = {1: "VDD", 2: "GPI", 11: "GND",
+                  **{n: f"PIN{n}" for n in list(range(3, 11)) + list(range(12, 21))}}
+_SLG46620 = dict(out_only=[], no_oe=[f"PIN{n}" for n in (4, 6, 8, 12, 15, 17, 20)],
+                 reserved=[])
+
+DEVICES["SLG46826"] = Device(
+    "SLG46826", 0, {
+        "STQFN20": _gp_package("STQFN20", _SLG46826_STQFN, sides=(6, 4, 6, 4),
+                               footprint=_STQFN, **_SLG46826),
+        "TSSOP20": _gp_package("TSSOP20", _SLG46826_TSSOP, sides=(10, 0, 10, 0),
+                               footprint=_TSSOP, **_SLG46826),
+    }, 5.0, kind="greenpak", supply="2.5-5 V (VDD2 1.8-5 V)",
+    # 3x 2-bit LUT/DFF, 1x 2-bit LUT (or pattern generator), 6+7 3-bit LUT/DFF
+    # (7 of them share a cell with an 8-bit counter), 1x 3-bit LUT (or pipe
+    # delay), 1x 4-bit LUT/DFF (shares a cell with a 16-bit counter).
+    resources={"lut2_dff": 3, "lut2": 1, "lut3_dff": 13, "lut3": 1, "lut4_dff": 1},
+    note="in-system reprogrammable over I2C")
+DEVICES["SLG46620"] = Device(
+    "SLG46620", 0, {
+        "STQFN20": _gp_package("STQFN20", _SLG46620_PINS, sides=(6, 4, 6, 4),
+                               footprint=_STQFN, **_SLG46620),
+        "TSSOP20": _gp_package("TSSOP20", _SLG46620_PINS, sides=(10, 0, 10, 0),
+                               footprint=_TSSOP, **_SLG46620),
+    }, 5.0, kind="greenpak", supply="1.8-5 V",
+    # 8x 2-bit LUT, 16x 3-bit LUT, 2x 4-bit LUT (one doubles as the pattern
+    # generator), 12 dedicated DFF/latches, 2 inverters.
+    resources={"lut2": 8, "lut3": 16, "lut4": 2, "dff": 12, "inv": 2},
+    note="one-time programmable (emulate on the dev board first)")
+
+
 def get_package(device: str, package: str) -> Tuple[Device, Package]:
     dev = DEVICES.get(device.upper())
     if dev is None:
@@ -89,35 +180,59 @@ class PinResult:
     free_inputs: List[int] = field(default_factory=list)
 
 
-def assign_pins(device: str, package: str, signals: List[Tuple[str, str]],
+def _needs_oe(direction: str, drive: str) -> bool:
+    return direction == "inout" or (direction == "output" and drive == "tri")
+
+
+def assign_pins(device: str, package: str, signals: List[Tuple],
                 locks: Dict[str, int], keep_jtag: bool = True) -> PinResult:
-    """signals: (name, 'input'|'output'|'inout'). Returns pin numbers.
+    """signals: (name, 'input'|'output'|'inout'[, drive]) where drive is
+    "tri" for a 3-state output. Returns pin numbers.
 
     Locked signals keep their pins. Remaining inputs go to the dedicated
     input-only pins first, then everything fills the general I/O pins in
     ascending order. JTAG pins are reserved unless keep_jtag is False.
+    On packages whose pins differ (GreenPAK: output-only pins, pins without
+    an output enable), each signal only goes where it can work: 3-state and
+    bidirectional signals need a pin with an output enable, and the more
+    limited pins are used up first.
     """
     res = PinResult()
     dev, pkg = get_package(device, package)
+    sigs = [(t[0], t[1], t[2] if len(t) > 2 else "") for t in signals]
     in_only = set(pkg.inputs.values())
     usable_io = [p for p in pkg.io if not (keep_jtag and p in pkg.jtag.values())]
     free_io = list(usable_io)
     free_in = sorted(in_only)
-    directions = dict(signals)
+    info = {name: (d, drive) for name, d, drive in sigs}
+    out_only, no_oe = set(pkg.out_only), set(pkg.no_oe)
+
+    def why_not(pin: int, d: str, drive: str) -> str:
+        """Why a signal can't use this I/O pin ('' if it can)."""
+        if d != "output" and pin in out_only:
+            return f"pin {pin} is output-only"
+        if _needs_oe(d, drive) and (pin in no_oe or pin in out_only):
+            kind = "bidirectional" if d == "inout" else "3-state"
+            return f"pin {pin} has no output enable, so it can't be {kind}"
+        return ""
 
     for sig, pin in locks.items():
-        if sig not in directions:
+        if sig not in info:
             res.errors.append(f"pin lock for unknown signal {sig!r}")
             continue
+        d, drive = info[sig]
         pin = int(pin)
         if pin in in_only:
-            if directions[sig] != "input":
-                res.errors.append(f"{sig} is an {directions[sig]} but pin {pin} "
-                                  f"is input-only")
+            if d != "input":
+                res.errors.append(f"{sig} is an {d} but pin {pin} is input-only")
                 continue
             free_in.remove(pin) if pin in free_in else res.errors.append(
                 f"pin {pin} locked twice")
         elif pin in free_io:
+            reason = why_not(pin, d, drive)
+            if reason:
+                res.errors.append(f"{sig}: {reason}")
+                continue
             free_io.remove(pin)
         elif keep_jtag and pin in pkg.jtag.values():
             res.errors.append(f"pin {pin} is a JTAG pin (use --no-jtag to free it)")
@@ -128,22 +243,53 @@ def assign_pins(device: str, package: str, signals: List[Tuple[str, str]],
             continue
         res.pins[sig] = pin
 
-    todo = [(s, d) for s, d in signals if s not in res.pins]
-    for sig, d in todo:
+    todo = [(s_, d, drive) for s_, d, drive in sigs if s_ not in res.pins]
+    for sig, d, _ in todo:
         if d == "input" and free_in:
             res.pins[sig] = free_in.pop(0)
-    for sig, d in todo:
-        if sig in res.pins:
-            continue
-        if not free_io:
-            need = len(todo) - sum(1 for s, _ in todo if s in res.pins)
-            res.errors.append(
-                f"design needs {len(signals)} pins; {dev.name} {pkg.name} has "
-                f"{len(usable_io) + len(in_only)} usable "
-                f"({len(usable_io)} I/O + {len(in_only)} input-only"
-                f"{', JTAG reserved' if keep_jtag else ''}). {need} signal(s) left over.")
-            break
-        res.pins[sig] = free_io.pop(0)
+
+    def overflow(left: int, what: str = "") -> None:
+        res.errors.append(
+            f"design needs {len(sigs)} pins; {dev.name} {pkg.name} has "
+            f"{len(usable_io) + len(in_only)} usable "
+            f"({len(usable_io)} I/O + {len(in_only)} input-only"
+            f"{', JTAG reserved' if keep_jtag and pkg.jtag else ''}). "
+            f"{left} signal(s) left over{what}.")
+
+    if not pkg.restricted:
+        for sig, d, _ in todo:
+            if sig in res.pins:
+                continue
+            if not free_io:
+                overflow(sum(1 for s_, _, _ in todo if s_ not in res.pins))
+                break
+            res.pins[sig] = free_io.pop(0)
+    else:
+        # Most demanding first, each onto the least capable pin that works.
+        def rank(pin: int) -> int:        # lower = less capable, used first
+            return 0 if pin in out_only else 1 if pin in no_oe else 2
+        groups = [
+            [t for t in todo if _needs_oe(t[1], t[2])],
+            [t for t in todo if t[1] == "input"],
+            [t for t in todo if t[1] == "output" and not _needs_oe(t[1], t[2])],
+        ]
+        short = []
+        for group in groups:
+            for sig, d, drive in group:
+                if sig in res.pins:
+                    continue
+                ok = sorted((p for p in free_io if not why_not(p, d, drive)),
+                            key=lambda p: (rank(p), p))
+                if not ok:
+                    short.append((sig, d, drive))
+                    continue
+                res.pins[sig] = ok[0]
+                free_io.remove(ok[0])
+        if short:
+            n_oe = sum(1 for _, d, dr in short if _needs_oe(d, dr))
+            what = (f" ({n_oe} of them 3-state/bidirectional, which need one of the "
+                    f"{len(pkg.oe_pins())} pins with an output enable)") if n_oe else ""
+            overflow(len(short), what)
     res.free_io, res.free_inputs = free_io, free_in
     return res
 

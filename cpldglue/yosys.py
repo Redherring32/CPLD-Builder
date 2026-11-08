@@ -141,6 +141,10 @@ tee -o stat.txt stat
 # ---------------------------------------------------------------------------
 # ATF15xx flow, after https://github.com/hoglet67/atf15xx_yosys
 # ---------------------------------------------------------------------------
+# 3-state output pins use the bidirectional pad (bibuf) with its input side
+# unused. The reference flow maps them to TRI, which the fitter only knows as
+# an internal buffer: any design with a plain 3-state output then stops with
+# "INTERNAL ERROR - Please contact your Hot-Line".
 def atf_yosys_script(name: str, flow_dir: Path, cwd: Path = Path(".")) -> str:
     lib = rel(flow_dir / "cells.lib", cwd)
     tmap = rel(flow_dir / "techmap.v", cwd)
@@ -152,7 +156,7 @@ techmap -map {tmap} -D skip_DFFE_XX_
 simplemap
 dfflibmap -liberty {lib}
 abc -liberty {lib}
-iopadmap -bits -inpad INBUF Q:A -outpad BUF A:Q -toutpad TRI ENA:A:Q -tinoutpad bibuf EN:Q:A:PAD
+iopadmap -bits -inpad INBUF Q:A -outpad BUF A:Q -toutpad bibuf EN:A:PAD -tinoutpad bibuf EN:Q:A:PAD
 clean
 hierarchy
 splitnets -format _
@@ -202,17 +206,50 @@ def run_atf_flow(name: str, outdir: Path, device: str, package: str,
         return (f"EDIF written to {outdir / (name + '.edif')}. Fitter not found "
                 f"(fit{''.join(c for c in device if c.isdigit())}.exe). Get it from Setup "
                 f"(or pass --fitter-dir) to finish the .jed.")
+    # The fitter reads its device database (atmel.std) from the folder it runs
+    # in, not from its own; without it every design fails with "Checking
+    # Extra wiring failed".
+    std = fitter.parent / "atmel.std"
+    if std.exists():
+        shutil.copyfile(std, outdir / "atmel.std")
     cmd = [str(fitter), "-i", f"{name}.edif", "-ifmt", "edif", "-o", f"{name}.jed",
            "-lib", str(fitter.parent / "aprim.lib"), "-tech", fitter_tech(device),
            "-device", package, "-tpd", str(speed), "-preassign", "keep"]
     if sys.platform != "win32":
         cmd = ["wine"] + cmd
     cmd += extra or []
+    from .devices import parse_pin_file
+    pinf = outdir / f"{name}.pin"
+    wanted = parse_pin_file(pinf.read_text(encoding="utf-8")) if pinf.exists() else {}
     r = subprocess.run(cmd, cwd=str(outdir), capture_output=True, text=True,
                        stdin=subprocess.DEVNULL, **no_window())
     (outdir / "fitter.log").write_text(r.stdout + r.stderr, encoding="utf-8")
     if r.returncode != 0 or not (outdir / f"{name}.jed").exists():
-        raise RuntimeError(f"fitter failed, see {outdir / 'fitter.log'}")
+        tail = " ".join((r.stdout + r.stderr).split()[-12:])
+        raise RuntimeError(f"fitter failed ({tail}); see {outdir / 'fitter.log'} "
+                           f"and {name}.fit")
+    fit = outdir / f"{name}.fit"
+    placed = fitted_pins(fit.read_text(encoding="utf-8", errors="replace")) if fit.exists() else {}
+    moved = {sig: (pin, placed.get(sig)) for sig, pin in wanted.items()
+             if placed and placed.get(sig) != pin}
+    if moved:
+        raise RuntimeError("the fitter moved pins (the board would not match): " + ", ".join(
+            f"{sig} {want}->{got}" for sig, (want, got) in moved.items())
+            + f"; see {fit}")
+    from .fitcheck import verify
+    try:
+        check = verify(name, outdir) or ""
+    except Exception as e:                      # the check must not hide a good build
+        check = f"Fitted logic not checked ({type(e).__name__}: {e})."
     return (f"JEDEC file: {outdir / (name + '.jed')}\n"
-            f"Fitter report: {outdir / (name + '.fit')} (check the pin list "
-            f"matches {name}.pin)")
+            f"Fitter report: {fit}\n"
+            f"All {len(wanted)} signals are on the pins cpldglue assigned.\n" + check).rstrip()
+
+
+def fitted_pins(fit_text: str) -> dict:
+    """Signal -> pin from the 'Pin/Node Placement' list of a fitter report."""
+    import re
+    out = {}
+    for m in re.finditer(r"^Pin\s+(\d+)\s*=\s*([A-Za-z_]\w*)\s*;", fit_text, re.M):
+        out[m.group(2)] = int(m.group(1))
+    return out

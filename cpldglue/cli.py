@@ -25,6 +25,10 @@ def _common(p: argparse.ArgumentParser) -> None:
                    help="lock pins from a .pin file (e.g. one saved earlier)")
     p.add_argument("--no-jtag", action="store_true",
                    help="use the 4 JTAG pins as I/O (no in-circuit reprogramming)")
+    p.add_argument("--variant", help="variant to generate / build (default: build "
+                                      "every variant; see `variant` lines in .cg files)")
+    p.add_argument("--variant-select", choices=["build", "pins"],
+                   help="variants: one design per variant, or all in one chosen by VAR_SEL pins")
     p.add_argument("--check", action="store_true",
                    help="also run a generic Yosys synthesis as a sanity check")
 
@@ -43,6 +47,15 @@ def _apply(d: dsg.Design, a) -> None:
     for item in a.lock:
         sig, _, pin = item.partition("=")
         d.pin_locks[sig] = int(pin)
+
+
+def _apply_variant(d: dsg.Design, a) -> None:
+    if getattr(a, "variant_select", None):
+        d.variant_mode = a.variant_select
+    if getattr(a, "variant", None):
+        if a.variant not in d.variants:
+            raise ValueError(f"no variant {a.variant!r}; variants: {', '.join(d.variants) or 'none'}")
+        d.variant = a.variant
 
 
 def _emit(d: dsg.Design, a) -> int:
@@ -111,6 +124,11 @@ def main(argv=None) -> int:
     ks.add_argument("--copy", action="store_true",
                     help="also put the schematic snippet on the clipboard")
 
+    gp = sub.add_parser("greenpak", help="GreenPAK: check the LUT/DFF fit and write the "
+                                          "sheet for Go Configure")
+    gp.add_argument("project", type=Path)
+    _common(gp)
+
     st = sub.add_parser("setup", help="show optional tools, or download them")
     st.add_argument("what", nargs="*", metavar="{yosys,flow,fitter}",
                     help="what to download (nothing = just show status)")
@@ -136,6 +154,26 @@ def main(argv=None) -> int:
             mark = "found" if d["found"] else "missing"
             print(f"{d['title']:<40} {mark:<8} {d['where'] or d['download']}")
         return 0
+    if a.cmd == "greenpak":
+        from . import greenpak
+        d = dsg.load(a.project)
+        _apply(d, a)
+        _apply_variant(d, a)
+        try:
+            r = generate.generate(d)
+            m = greenpak.map_design(d, r, a.out / "greenpak-work")
+        except (ValueError, KeyError, RuntimeError) as err:
+            print(f"error: {err}", file=sys.stderr)
+            return 2
+        for t, n in m.fit.total.items():
+            print(f"{greenpak.SLOT_TITLES[t]:<24} {m.fit.used[t]:>3} / {n}")
+        print(("Fits." if m.fit.ok else "Does NOT fit:") + "".join(f"\n  no room for {u}" for u in m.fit.unplaced))
+        for n in m.notes:
+            print(f"note: {n}")
+        out = a.out / f"{generate.sanitize(d.name)}-greenpak.html"
+        out.write_text(greenpak.sheet_html(d, r, m), encoding="utf-8")
+        print(f"Wrote {out}")
+        return 0 if m.fit.ok else 1
     if a.cmd == "kicad-symbol":
         from . import kicad_symbol
         try:
@@ -166,10 +204,22 @@ def main(argv=None) -> int:
             return 0
         if a.cmd == "devices":
             for dev in devices.DEVICES.values():
-                print(f"{dev.name:<12} {dev.macrocells:>3} macrocells, {dev.vcc:g} V")
+                if dev.kind == "greenpak":
+                    cells = ", ".join(f"{n} {t}" for t, n in dev.resources.items())
+                    print(f"{dev.name:<12} GreenPAK ({cells}), {dev.supply}")
+                else:
+                    print(f"{dev.name:<12} {dev.macrocells:>3} macrocells, {dev.vcc:g} V")
                 for pkg in dev.packages.values():
-                    print(f"    {pkg.name:<8} {len(pkg.io):>2} I/O (4 are JTAG) + "
-                          f"{len(pkg.inputs)} input-only")
+                    extra = []
+                    if pkg.jtag:
+                        extra.append("4 are JTAG")
+                    if pkg.out_only:
+                        extra.append(f"{len(pkg.out_only)} output-only")
+                    if pkg.no_oe:
+                        extra.append(f"{len(pkg.no_oe)} without output enable")
+                    print(f"    {pkg.name:<8} {len(pkg.io):>2} I/O"
+                          + (f" ({', '.join(extra)})" if extra else "")
+                          + f" + {len(pkg.inputs)} input-only")
             return 0
         if a.cmd == "kicad":
             overrides = dict(x.split("=", 1) for x in a.part)
@@ -178,6 +228,15 @@ def main(argv=None) -> int:
         else:
             d = dsg.load(a.project)
         _apply(d, a)
+        _apply_variant(d, a)
+        every = (a.cmd == "build" and d.variants and d.variant_mode != "pins"
+                 and not a.variant)
+        if every:                      # one build per variant, same pins in each
+            from .gui import api
+            from . import deps
+            res = api.Builder(a.flow_dir or deps.flow_dir(), a.fitter_dir).build(d, a.out)
+            print(res["log"])
+            return 0 if res["ok"] else 1
         rc = _emit(d, a)
         if a.cmd == "build" and rc == 0:
             from . import deps

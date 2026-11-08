@@ -35,9 +35,13 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
       const r = await api.kicadComponents(path.trim().replace(/^"|"$/g, ""));
       setPath(r.path);
       setComps(r.components);
-      // Tick every logic chip the library knows; the pin count then shows
-      // whether they all fit.
-      setPicked(new Set(r.components.filter((c) => c.part).map((c) => c.ref)));
+      // Tick every logic chip the library knows (the pin count then shows
+      // whether they all fit), except alternatives: of chips that drive the
+      // same nets, only the first is ticked.
+      const skip = new Set((r.alternatives ?? []).flatMap((g) => g.refs.slice(1)));
+      setPicked(new Set(r.components.filter((c) => c.part && !skip.has(c.ref)).map((c) => c.ref)));
+      setAlts(r.alternatives ?? []);
+      setKept(new Set());
       setOverrides({});
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -47,6 +51,20 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
   };
 
   const refs = useMemo(() => [...picked].sort(), [picked]);
+  const [alts, setAlts] = useState<api.KiAlternatives[]>([]);
+  // Alternatives groups kept as variants instead of picking one chip.
+  const [kept, setKept] = useState<Set<number>>(new Set());
+  const variants = useMemo(() => {
+    const groups = alts.filter((_, i) => kept.has(i))
+      .map((g) => g.refs.filter((r) => picked.has(r))).filter((g) => g.length > 1);
+    if (!groups.length) return undefined;
+    // every combination of one chip per group (capped at 8 variants)
+    let combos: string[][] = [[]];
+    for (const g of groups) combos = combos.flatMap((c) => g.map((r) => [...c, r]));
+    const value = (r: string) => comps?.find((c) => c.ref === r)?.value ?? "";
+    return Object.fromEntries(combos.slice(0, 8).map((c) =>
+      [c.map((r) => `${r} ${value(r)}`.trim()).join(" + "), c]));
+  }, [alts, kept, picked, comps]);
 
   // Live preview of the pin count as chips are ticked.
   useEffect(() => {
@@ -54,12 +72,12 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
     if (!refs.length) { setPreview(null); return; }
     let stale = false;
     const t = setTimeout(() => {
-      api.kicadPreview(path, refs, overrides, design)
+      api.kicadPreview(path, refs, overrides, design, variants)
         .then((p) => { if (!stale) { setPreview(p); setError(""); } })
         .catch((e) => { if (!stale) { setPreview(null); setError(String(e.message ?? e)); } });
     }, 200);
     return () => { stale = true; clearTimeout(t); };
-  }, [comps, refs, overrides, path, design]);
+  }, [comps, refs, overrides, path, design, variants]);
 
   const toggle = (ref: string) => setPicked((s) => {
     const n = new Set(s);
@@ -110,6 +128,27 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
                 </span>
               )}
             </div>
+            {alts.map((g, i) => (
+              <div key={g.refs.join()} className="msg note small" data-testid="import-alts">
+                {g.refs.join(", ")} drive the same nets ({g.nets.slice(0, 3).join(", ")}
+                {g.nets.length > 3 ? ", …" : ""}), so they look like alternatives for one place
+                on the board.{" "}
+                {kept.has(i)
+                  ? <>All are kept as variants: the CPLD covers each one (see <b>Variants…</b> after importing).</>
+                  : <>Only {g.refs[0]} is ticked; tick the one you fit instead, or keep them all as variants.</>}
+                {" "}<button className="linkbtn" onClick={() => {
+                  const next = new Set(kept);
+                  if (next.has(i)) {
+                    next.delete(i);
+                    setPicked((s) => { const n = new Set(s); g.refs.slice(1).forEach((r) => n.delete(r)); return n; });
+                  } else {
+                    next.add(i);
+                    setPicked((s) => new Set([...s, ...g.refs]));
+                  }
+                  setKept(next);
+                }}>{kept.has(i) ? "Pick one instead" : "Keep all as variants"}</button>
+              </div>
+            ))}
             <div className="comp-table">
               <table>
                 <thead><tr><th></th><th>Ref</th><th>Value</th><th>Model</th></tr></thead>
@@ -122,7 +161,9 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
                                    checked={picked.has(c.ref)} disabled={!model}
                                    onChange={() => toggle(c.ref)} /></td>
                         <td className="mono">{c.ref}</td>
-                        <td className="mono small">{c.value}</td>
+                        <td className="mono small">{c.value}
+                          {c.alternatives && c.alternatives.length > 0 &&
+                            <span className="muted"> · or {c.alternatives.join(" / ")}</span>}</td>
                         <td>
                           <select value={model ?? ""} aria-label={`Model for ${c.ref}`}
                                   onChange={(e) => {

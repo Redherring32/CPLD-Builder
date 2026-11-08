@@ -74,6 +74,9 @@ export function removePart(d: Design, ref: string): Design {
   const out = clone(d);
   delete out.parts[ref];
   delete out.layout[ref];
+  if (out.variants)
+    for (const v of Object.keys(out.variants))
+      out.variants[v] = out.variants[v].filter((r) => r !== ref);
   for (const [name, net] of Object.entries(out.nets)) {
     net.nodes = net.nodes.filter((n) => n.ref !== ref);
     if (!net.nodes.length) delete out.nets[name];
@@ -94,6 +97,9 @@ export function renamePart(d: Design, ref: string, newRef: string): Design {
   const out = clone(d);
   out.parts = Object.fromEntries(Object.entries(out.parts).map(([k, v]) => [k === ref ? newRef : k, v]));
   if (out.layout[ref]) { out.layout[newRef] = out.layout[ref]; delete out.layout[ref]; }
+  if (out.variants)
+    for (const v of Object.keys(out.variants))
+      out.variants[v] = out.variants[v].map((r) => (r === ref ? newRef : r));
   for (const net of Object.values(out.nets))
     for (const n of net.nodes) if (n.ref === ref) n.ref = newRef;
   return out;
@@ -255,6 +261,36 @@ export function setDesignField<K extends "name" | "device" | "package" | "keep_j
 // Comparison
 // ---------------------------------------------------------------------------
 /** Order-independent description of a design's logic (ignores layout). */
+// ---------------------------------------------------------------------------
+// Variants
+// ---------------------------------------------------------------------------
+/** Replace the variants (name -> optional chips fitted in it). */
+export function setVariants(d: Design, variants: Record<string, string[]>,
+                            mode?: "build" | "pins"): Design {
+  const out = clone(d);
+  for (const name of Object.keys(variants))
+    if (!name.trim()) throw new Error("A variant needs a name");
+  out.variants = variants;
+  if (mode) out.variant_mode = mode;
+  if (!out.variant || !(out.variant in variants)) out.variant = Object.keys(variants)[0] ?? "";
+  if (!Object.keys(variants).length) { delete out.variants; out.variant = ""; }
+  return out;
+}
+
+export function setActiveVariant(d: Design, name: string): Design {
+  const out = clone(d);
+  out.variant = name;
+  return out;
+}
+
+/** Optional chip -> the variants that fit it. */
+export function optionalChips(d: Design): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [v, refs] of Object.entries(d.variants ?? {}))
+    for (const r of refs) (out[r] ??= []).push(v);
+  return out;
+}
+
 export function canonical(d: Design): string {
   const nets = Object.values(d.nets)
     .map((n) => [n.name, n.external, n.const, n.nodes.map(pinKey).sort()] as const)

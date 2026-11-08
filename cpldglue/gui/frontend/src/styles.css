@@ -287,6 +287,8 @@ td.dir.inout { color: var(--k-b); }
 .pin .plabel { fill: var(--text); font-size: 12px; font-family: ui-monospace, Consolas, monospace; pointer-events: none; }
 .pin.t-power rect { fill: var(--line); stroke: var(--line); }
 .pin.t-power .plabel, .pin.t-jtag .plabel { fill: var(--muted); }
+.pin.t-reserved rect { fill: color-mix(in srgb, var(--warning) 25%, var(--panel)); stroke: var(--warning); stroke-dasharray: 3 2; }
+.pin.t-reserved .plabel { fill: var(--muted); }
 .pin.t-jtag rect { fill: color-mix(in srgb, var(--warning) 25%, var(--panel)); stroke: var(--warning); stroke-dasharray: 3 2; }
 .pin.t-input.free rect { stroke: var(--k-i); stroke-dasharray: 2 2; }
 .pin.d-input rect { fill: var(--k-i); stroke: var(--k-i); }
@@ -413,3 +415,28 @@ table.keys td:first-child { white-space: nowrap; color: var(--accent); }
 .mcbar-note { margin: 4px 0 2px; }
 .chip-mc { position: absolute; top: 6px; left: 8px; font-size: 10px; color: var(--chip-muted);
   display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+
+/* GreenPAK logic-cell meters */
+.gp-ok { color: var(--k-o); font-weight: 600; font-size: 12px; }
+.gp-cells { width: 100%; border-collapse: collapse; margin: 2px 0 4px; }
+.gp-cells td { padding: 2px 4px; white-space: nowrap; }
+.gp-cells td.gp-meter { width: 45%; }
+.gp-cells td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.gp-track { display: block; height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.gp-fill { display: block; height: 100%; border-radius: 4px; background: var(--series-1); }
+.gp-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.modal.gp-sheet { width: min(980px, 96vw); }
+.gp-frame { width: 100%; height: min(70vh, 640px); border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+
+.msg.note { border-left: 3px solid var(--accent); padding: 4px 8px; margin: 4px 0;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+
+/* Variants */
+.chip-inactive { opacity: .4; }
+.chip-variant { position: absolute; bottom: 4px; left: 0; right: 0; text-align: center;
+  font-size: 10px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 8px; }
+.modal.variants { width: min(760px, 96vw); }
+.modal .variant-mode { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; margin: 6px 0; }
+.modal .variant-mode label { align-self: flex-start; text-align: left; }
+.variant-grid th input { width: 9em; }
+.variant-grid td.center { text-align: center; }

@@ -173,15 +173,68 @@ your own copies instead, pass `--flow-dir` (a checkout of
 `--fitter-dir` (the folder with `fit1502.exe` … and `aprim.lib` from
 Microchip's ProChip or WinCUPL).
 
-**The fitter step is not yet tested.** The Yosys stage (Verilog → EDIF
-with the ATF cell library) has been run; the Microchip fitter hasn't. Two
-things to confirm on the first real build:
-1. That the fitter honours the pin assignment. cpldglue writes both
-   `NAME.pin` and `//PIN:` comments, as the reference flow does, and passes
-   `-preassign keep`. Compare the pin list in `NAME.fit` against `NAME.pin`.
-2. That `-tech`/`-device` are right for your part. cpldglue passes the AS
-   or ASV name (an ASL/ASVL part builds as AS/ASV, as the fitter's own help
-   lists only those) and the package name, e.g. `-tech ATF1504AS -device PLCC84`.
+Every build checks its result:
+- **Pins:** the fitter's placement (`NAME.fit`) is compared with the pins
+  cpldglue assigned; a moved pin stops the build, since the board would not
+  match.
+- **Logic** (combinational designs): the fitter's final equations
+  (`NAME.tt3`) are evaluated on random inputs and compared with the
+  simulator, which checks the whole chain: cpldglue's Verilog, Yosys and the
+  fitter. Designs with flip-flops are not checked this way yet.
+
+Tested with Microchip's fitters (`fit1502/1504/1508.exe`, ProChip 5.0.1) on
+the TinyTendo glue (ATF1502AS, ATF1504AS, ATF1508AS) and a discrete-mapper
+cartridge in every variant. Two things the reference flow gets wrong are
+handled: the fitter needs its `atmel.std` in the folder it runs in (else
+"Checking Extra wiring failed"), and 3-state output pins must use the
+bidirectional pad (`bibuf`), not `TRI` (else "INTERNAL ERROR").
+
+cpldglue passes the AS or ASV name (an ASL/ASVL part builds as AS/ASV, as
+the fitter's own help lists only those) and the package name, e.g.
+`-tech ATF1504AS -device PLCC84`.
+
+## Variants: "fit one of" boards
+
+Some boards take one of several chips in the same place, chosen by the
+build (the MouseBite Labs discrete-mapper cartridge fits a 74x377 *or* one
+of two 74x161s, depending on the mapper). The import dialog spots these
+(their outputs drive the same nets) and offers **Keep all as variants**;
+**Variants…** in the toolbar edits them: name each variant and tick the
+chips it fits (chips in no variant are always fitted). Two ways to use them:
+
+- **One build per variant.** Build makes one `.jed` per variant, each in its
+  own folder, with every signal on the same pin in all of them (one board,
+  one socket: program the file for the mapper you want). The toolbar picks
+  the variant shown, simulated and reported.
+- **Select pins.** Every variant goes into the CPLD; `VAR_SEL0`,
+  `VAR_SEL1`... input pins choose one (wire them to jumpers or solder pads to
+  GND/VCC; the report lists each variant's code). An optional chip's outputs
+  only drive while its variant is selected. Uses more of the chip: the
+  mapper above needs 26 pins on an ATF1504AS rather than 16-24.
+
+In a `.cg` file:
+
+```
+variant AxROM: U4A
+variant UxROM: U4B
+variant CNROM: U4C
+variant-select build        # or: pins
+variant-active UxROM        # the variant shown in build mode
+```
+
+On the command line, `build` makes every variant (or `--variant NAME`), and
+`--variant-select pins|build` overrides the project's choice.
+
+## GreenPAK (design and check)
+
+The Renesas SLG46826 and SLG46620 (TSSOP-20 and STQFN-20) are supported as
+design-and-check targets: pin assignment knows each pin's limits (output-only
+pins, pins without an output enable, the SLG46826's I2C pins), and the report
+panel maps the logic onto the part's LUTs and DFFs with Yosys and shows
+whether it fits. There is no open tool chain that programs GreenPAKs, so
+**LUT sheet…** prints every LUT's truth table, the DFFs and the pins, to
+enter in Renesas Go Configure. `cpldglue greenpak project.cg -o out` does the
+same from the command line.
 
 ## Devices
 
@@ -223,6 +276,7 @@ net     "Net-(J1-Pad 1)": U7.3   # quote names with spaces, ':' or '#'
 net     N4 auto: U7.6 U7.10  # "auto" = unlabelled net; "const=0"/"const=1" force a constant
 pin     CPU_A13 12           # lock a pin
 layout  U7 120 40            # editor position (written by the GUI)
+variant AxROM: U4A           # variants: see "Variants" above
 ```
 
 ## How nets are resolved

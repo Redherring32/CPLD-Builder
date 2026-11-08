@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from .. import chips, devices, generate
 from ..design import Design, load, save as save_design
@@ -41,6 +41,11 @@ def devices_payload() -> dict:
                 "power": {str(k): v for k, v in pkg.power.items()},
                 "pin_count": pkg.pin_count,
                 "nc": pkg.nc, "vcc": dev.vcc,
+                "kind": dev.kind, "resources": dev.resources, "supply": dev.supply,
+                "note": dev.note, "out_only": pkg.out_only, "no_oe": pkg.no_oe,
+                "reserved": pkg.reserved,
+                "pin_names": {str(k): v for k, v in pkg.pin_names.items()},
+                "style": pkg.style, "sides": list(pkg.sides) if pkg.sides else None,
             })
     return {"devices": out}
 
@@ -70,7 +75,7 @@ def generate_payload(design: Design) -> dict:
         }
     return {
         "ok": r.ok,
-        "ports": [{"name": p.name, "direction": p.direction, "net": p.net,
+        "ports": [{"name": p.name, "direction": p.direction, "net": p.net, "drive": p.drive,
                    "pin": r.pins.get(p.name)} for p in r.ports],
         "capacity": capacity(design),
         "macrocells": None if r.macrocells is None else {
@@ -118,27 +123,91 @@ class KiCadImporter:
         return p, self._cache[key]
 
     def components(self, path) -> dict:
-        p, (comps, _nets) = self._netlist(Path(path))
+        p, (comps, nets) = self._netlist(Path(path))
+        groups = alternatives(comps, nets)
+        group_of = {ref: g for g in groups for ref in g["refs"]}
         rows = []
         for ref, value in sorted(comps.items(), key=lambda kv: _natural(kv[0])):
             part = chips.lookup(value)
-            rows.append({"ref": ref, "value": value, "part": part.key if part else None})
-        return {"path": str(p), "components": rows}
+            g = group_of.get(ref)
+            rows.append({"ref": ref, "value": value, "part": part.key if part else None,
+                         "alternatives": [r for r in g["refs"] if r != ref] if g else []})
+        return {"path": str(p), "components": rows, "alternatives": groups}
 
-    def design(self, path, refs, overrides=None, base: Optional[Design] = None) -> Design:
+    def design(self, path, refs, overrides=None, base: Optional[Design] = None,
+               variants: Optional[dict] = None) -> Design:
         from .. import design as dsg
         p, (comps, knets) = self._netlist(Path(path))
         d = dsg.design_from_netlist(comps, knets, refs, "glue", overrides or {})
         if base is not None:
             d.name, d.device, d.package = base.name, base.device, base.package
             d.keep_jtag = base.keep_jtag
+        if variants:                   # "keep as variants" in the import dialog
+            d.variants = {k: list(v) for k, v in variants.items()}
+            d.variant_mode = base.variant_mode if base is not None and base.variants else "build"
+            d.variant = next(iter(d.variants))
         return d
 
-    def preview(self, path, refs, overrides=None, base: Optional[Design] = None) -> dict:
-        d = self.design(path, refs, overrides, base)
+    def preview(self, path, refs, overrides=None, base: Optional[Design] = None,
+                variants: Optional[dict] = None) -> dict:
+        d = self.design(path, refs, overrides, base, variants)
         r = generate.generate(d)
-        return {"pins": len(r.ports), "capacity": capacity(d), "errors": r.errors,
+        errors = list(r.errors)
+        _, (comps, nets) = self._netlist(Path(path))
+        chosen = set(refs)
+        kept = {r for refs_ in (variants or {}).values() for r in refs_}
+        for g in alternatives(comps, nets, overrides):
+            both = [x for x in g["refs"] if x in chosen and x not in kept]
+            if len(both) > 1:
+                errors.insert(0, f"{_join(both)} drive the same nets ({_join(g['nets'][:3])}"
+                                 f"{', …' if len(g['nets']) > 3 else ''}): they look like "
+                                 f"alternative parts for one place on the board. Tick only "
+                                 f"the one you fit.")
+        return {"pins": len(r.ports), "capacity": capacity(d), "errors": errors,
                 "warnings": r.warnings, "design": _design_dict(d)}
+
+
+def _join(items) -> str:
+    items = list(items)
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def alternatives(comps: dict, nets: dict, overrides: Optional[dict] = None) -> list:
+    """Groups of chips whose outputs drive the same nets. Two push-pull
+    outputs on one net can't both be fitted, so on a real board these are
+    alternatives for one position ("populate U4A *or* U4B")."""
+    overrides = overrides or {}
+    kind_of = {}
+    for ref, value in comps.items():
+        part = chips.LIBRARY.get(overrides.get(ref, "")) or chips.lookup(value)
+        if part:
+            kind_of[ref] = {n: pin.kind for n, pin in part.pins.items()}
+    parent = {ref: ref for ref in kind_of}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    shared: Dict[frozenset, list] = {}
+    for name, nodes in nets.items():
+        drivers = [(n.ref, kind_of[n.ref].get(n.pin)) for n in nodes if n.ref in kind_of]
+        push = {ref for ref, k in drivers if k == "o"}
+        others = {ref for ref, k in drivers if k in ("o", "t", "oc", "b")}
+        if push and len(others) > 1:
+            refs = sorted(others, key=_natural)
+            for r in refs[1:]:
+                parent[find(r)] = find(refs[0])
+            shared.setdefault(frozenset(refs), []).append(name)
+    out: Dict[str, dict] = {}
+    for refs, names in shared.items():
+        root = find(next(iter(refs)))
+        g = out.setdefault(root, {"refs": set(), "nets": []})
+        g["refs"] |= refs
+        g["nets"] += [n.lstrip("/") for n in names]
+    return [{"refs": sorted(g["refs"], key=_natural), "nets": sorted(set(g["nets"]), key=_natural)}
+            for g in out.values()]
 
 
 def _natural(s: str):
@@ -200,13 +269,29 @@ class Builder:
                 "enabled": True}       # always shown; the dialog says what's missing
 
     def build(self, design: Design, outdir: Path) -> dict:
+        """Build the design; in variant build mode, one .jed per variant (each
+        in its own subfolder, all with the same pins)."""
+        if design.variants and design.variant_mode != "pins":
+            logs, oks = [], []
+            for v in design.variants:
+                dv = Design.from_json(design.to_json())
+                dv.variant = v
+                res = self._build_one(dv, outdir / generate.sanitize(v), f"_{generate.sanitize(v)}")
+                logs.append(f"=== variant {v} ===\n{res['log']}")
+                oks.append(res["ok"])
+            return {"ok": all(oks), "log": "\n\n".join(logs), "outdir": str(outdir)}
+        return self._build_one(design, outdir)
+
+    def _build_one(self, design: Design, outdir: Path, suffix: str = "") -> dict:
         from .. import yosys
         r = generate.generate(design)
         if not r.ok:
             return {"ok": False, "log": "Fix the report errors first:\n" + "\n".join(r.errors)}
-        top = generate.sanitize(design.name)
+        top = generate.sanitize(design.name) + suffix
         outdir.mkdir(parents=True, exist_ok=True)
-        (outdir / f"{top}.v").write_text(r.verilog, encoding="utf-8")
+        verilog = r.verilog.replace(f"module {generate.sanitize(design.name)} (",
+                                    f"module {top} (", 1)
+        (outdir / f"{top}.v").write_text(verilog, encoding="utf-8")
         (outdir / f"{top}.pin").write_text(r.pin_file(design), encoding="utf-8")
         log = [f"Wrote {outdir / (top + '.v')} and {top}.pin"]
         if self.flow_dir is None:

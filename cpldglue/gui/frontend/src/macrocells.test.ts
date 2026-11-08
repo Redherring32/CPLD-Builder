@@ -24,3 +24,27 @@ describe("chip colors for the macrocell bar", () => {
     expect(added).toEqual({ U1: 1, U3: 3, U9: 2 });      // the freed slot is reused
   });
 });
+
+describe("variants in the editor model", () => {
+  const base = () => ({ ...m.emptyDesign(), parts: { U4A: "74x377", U4B: "74x161", U5: "74x32" } });
+
+  it("sets variants, keeps the active one valid, and clears them", () => {
+    let d = m.setVariants(base(), { AxROM: ["U4A"], UxROM: ["U4B"] }, "pins");
+    expect(d.variant).toBe("AxROM");
+    expect(d.variant_mode).toBe("pins");
+    expect(m.optionalChips(d)).toEqual({ U4A: ["AxROM"], U4B: ["UxROM"] });
+    d = m.setActiveVariant(d, "UxROM");
+    d = m.setVariants(d, { UxROM: ["U4B"], CNROM: [] });
+    expect(d.variant).toBe("UxROM");
+    d = m.setVariants(d, {});
+    expect(d.variants).toBeUndefined();
+  });
+
+  it("follows chips being removed or renamed", () => {
+    let d = m.setVariants(base(), { AxROM: ["U4A"], UxROM: ["U4B"] });
+    d = m.renamePart(d, "U4B", "U9");
+    expect(d.variants).toEqual({ AxROM: ["U4A"], UxROM: ["U9"] });
+    d = m.removePart(d, "U4A");
+    expect(d.variants).toEqual({ AxROM: [], UxROM: ["U9"] });
+  });
+});

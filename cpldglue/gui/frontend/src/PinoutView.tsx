@@ -6,13 +6,22 @@ import * as api from "./api";
 export const SIGNAL_MIME = "application/x-cpldglue-signal";
 
 type Side = "top" | "left" | "bottom" | "right";
-type PinType = "io" | "input" | "jtag" | "power" | "nc";
+type PinType = "io" | "input" | "jtag" | "reserved" | "power" | "nc";
+type Sides = [number, number, number, number];   // left, bottom, right, top
 
 /** Where pin k of an n-pin package sits, as (side, index along the side in
  *  drawing order: left-to-right for top/bottom, top-to-bottom for left/right).
  *  PLCC: pin 1 in the middle of the top edge, counter-clockwise (seen from
  *  above). QFP: pin 1 at the top of the left edge, counter-clockwise. */
-export function placePin(pkg: string, k: number, total = 44): { side: Side; idx: number } {
+export function placePin(pkg: string, k: number, total = 44,
+                         sides?: Sides | null): { side: Side; idx: number } {
+  if (sides) {                                   // QFN/SOP with uneven sides
+    const [L, B, R] = sides;
+    if (k <= L) return { side: "left", idx: k - 1 };
+    if (k <= L + B) return { side: "bottom", idx: k - L - 1 };
+    if (k <= L + B + R) return { side: "right", idx: L + B + R - k };
+    return { side: "top", idx: total - k };
+  }
   const n = total / 4;
   if (pkg.startsWith("PLCC")) {
     const a = (n + 1) / 2;                       // pins 1..a on the top-left half
@@ -38,11 +47,14 @@ interface PinInfo {
 
 /** Drawing geometry: 44-pin packages keep their roomy pitch; bigger ones
  *  get a tighter pitch and a larger body. */
-function geometry(total: number) {
+function geometry(total: number, sides?: Sides | null) {
   const n = total / 4;
   const PITCH = n <= 11 ? 360 / 11 : 20;
-  const BODY = PITCH * n, BODY0 = 200;
-  return { n, PITCH, BODY, BODY0, S: BODY + 2 * BODY0, pinW: Math.min(16, PITCH * 0.7) };
+  const [L, B, R, T] = sides ?? [n, n, n, n];
+  const BW = PITCH * Math.max(B, T, 4), BH = PITCH * Math.max(L, R);
+  const M = total <= 20 ? 130 : 200;              // room for labels
+  return { PITCH, BW, BH, X0: M, Y0: M, W: BW + 2 * M, H: BH + 2 * M,
+           pinW: Math.min(16, PITCH * 0.7) };
 }
 
 export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
@@ -85,10 +97,16 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
     const portAt = Object.fromEntries(ports.filter((p) => p.pin != null).map((p) => [p.pin!, p]));
     const lockedPins = new Set(Object.values(design.pin_locks));
     const nc = new Set(device.nc ?? []);
+    const reservedRole = Object.fromEntries(Object.entries(device.reserved ?? {}).map(([n, p]) => [p, n]));
+    const outOnly = new Set(device.out_only ?? []), noOe = new Set(device.no_oe ?? []);
+    const names = device.pin_names ?? {};
     return Array.from({ length: device.pin_count }, (_, i) => {
       const num = i + 1;
-      let type: PinType = "io", role = "I/O";
-      if (device.power[String(num)]) { type = "power"; role = device.power[String(num)]; }
+      let type: PinType = "io", role = names[String(num)] ?? "I/O";
+      if (outOnly.has(num)) role += " (output only)";
+      else if (noOe.has(num)) role += " (no output enable: not 3-state)";
+      if (device.power[String(num)]) { type = "power"; role = names[String(num)] ?? device.power[String(num)]; }
+      else if (reservedRole[num]) { type = "reserved"; role = `${reservedRole[num]} (I2C / programming)`; }
       else if (nc.has(num)) { type = "nc"; role = "not connected"; }
       else if (inputRole[num]) { type = "input"; role = `${inputRole[num]} (input only)`; }
       else if (jtagRole[num]) {
@@ -107,6 +125,12 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
     if (pin.type === "power") return `Pin ${pin.num} is ${pin.role}`;
     if (pin.type === "nc") return `Pin ${pin.num} is not connected inside the chip`;
     if (pin.type === "jtag") return `Pin ${pin.num} is a JTAG pin (untick JTAG to use it)`;
+    if (pin.type === "reserved") return `Pin ${pin.num} is ${pin.role}`;
+    if (port.direction !== "output" && (device?.out_only ?? []).includes(pin.num))
+      return `Pin ${pin.num} is output-only; ${signal} is an ${port.direction}`;
+    const needsOe = port.direction === "inout" || port.drive === "tri";
+    if (needsOe && ((device?.no_oe ?? []).includes(pin.num) || (device?.out_only ?? []).includes(pin.num)))
+      return `Pin ${pin.num} has no output enable, so it can't carry the 3-state ${signal}`;
     if (pin.type === "input" && port.direction !== "input")
       return `Pin ${pin.num} is input-only; ${signal} is an ${port.direction}`;
     return null;
@@ -128,7 +152,8 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
     </div>;
   }
 
-  const { S, BODY0, BODY, PITCH, pinW } = geometry(device.pin_count);
+  const sides = (device.sides ?? null) as Sides | null;
+  const { W, H, X0, Y0, BW, BH, PITCH, pinW } = geometry(device.pin_count, sides);
   const plcc = design.package.startsWith("PLCC");
   // Up to 44 pins fit the panel; bigger packages are drawn near full size
   // (scrollable) so the labels stay readable.
@@ -141,32 +166,36 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
     <div className="pinout" data-testid="pinout">
       <div className="pinout-drawing">
         <div className={`pinout-scroll${fit ? "" : " full"}`}>
-        <svg viewBox={`0 0 ${S} ${S}`} role="img"
-             width={fit ? undefined : S * 0.85} height={fit ? undefined : S * 0.85}
+        <svg viewBox={`0 0 ${W} ${H}`} role="img"
+             width={fit ? undefined : W * 0.85} height={fit ? undefined : H * 0.85}
              aria-label={`${design.device} ${design.package} pinout`}>
-          <rect x={BODY0} y={BODY0} width={BODY} height={BODY} rx={plcc ? 18 : 4}
+          <rect x={X0} y={Y0} width={BW} height={BH} rx={plcc ? 18 : 4}
                 className="pkg-body" />
-          <circle cx={plcc ? S / 2 : BODY0 + 22}
-                  cy={BODY0 + 22} r={7} className="pkg-dot" />
-          <text x={S / 2} y={S / 2 - 8} className="pkg-name">{design.device}</text>
-          <text x={S / 2} y={S / 2 + 16} className="pkg-sub">{design.package}</text>
+          <circle cx={plcc ? W / 2 : X0 + 22}
+                  cy={Y0 + 22} r={7} className="pkg-dot" />
+          <text x={W / 2} y={H / 2 - 8} className="pkg-name">{design.device}</text>
+          <text x={W / 2} y={H / 2 + 16} className="pkg-sub">{design.package}</text>
           {pins.map((p) => {
-            const { side, idx } = placePin(design.package, p.num, device.pin_count);
-            const along = BODY0 + PITCH * (idx + 0.5);
+            const { side, idx } = placePin(design.package, p.num, device.pin_count, sides);
             const horiz = side === "top" || side === "bottom";
+            // centre each side's pins along its edge
+            const count = sides ? (side === "left" ? sides[0] : side === "bottom" ? sides[1]
+                                   : side === "right" ? sides[2] : sides[3]) : device.pin_count / 4;
+            const edge = horiz ? BW : BH;
+            const along = (horiz ? X0 : Y0) + (edge - PITCH * count) / 2 + PITCH * (idx + 0.5);
             const w = horiz ? pinW : 26, h = horiz ? 26 : pinW;
-            const x = horiz ? along - w / 2 : side === "left" ? BODY0 - w : BODY0 + BODY;
-            const y = horiz ? (side === "top" ? BODY0 - h : BODY0 + BODY) : along - h / 2;
+            const x = horiz ? along - w / 2 : side === "left" ? X0 - w : X0 + BW;
+            const y = horiz ? (side === "top" ? Y0 - h : Y0 + BH) : along - h / 2;
             // label outside the pin
             const lx = horiz ? along : side === "left" ? x - 6 : x + w + 6;
             const ly = horiz ? (side === "top" ? y - 6 : y + h + 6) : along;
             const anchor = horiz ? "start" : side === "left" ? "end" : "start";
             const rot = horiz ? (side === "top" ? `rotate(-90 ${lx} ${ly})` : `rotate(90 ${lx} ${ly})`) : undefined;
-            const numX = horiz ? along : side === "left" ? BODY0 + 6 : BODY0 + BODY - 6;
-            const numY = horiz ? (side === "top" ? BODY0 + 14 : BODY0 + BODY - 6) : along + 4;
+            const numX = horiz ? along : side === "left" ? X0 + 6 : X0 + BW - 6;
+            const numY = horiz ? (side === "top" ? Y0 + 14 : Y0 + BH - 6) : along + 4;
             const label = p.port ? p.port.name : p.type === "power" ? p.role
                         : p.type === "nc" ? "NC"
-                        : p.type === "jtag" ? p.role.split(" ")[0] : "";
+                        : p.type === "jtag" || p.type === "reserved" ? p.role.split(" ")[0] : "";
             const sel = !!p.port && p.port.net === selectedNet;
             const cls = ["pin", `t-${p.type}`, p.port ? `d-${p.port.direction}` : "free",
                          p.locked ? "locked" : "", sel ? "sel" : "",

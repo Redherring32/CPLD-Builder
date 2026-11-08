@@ -76,7 +76,8 @@ function PinRow({ refName, pin, part, hideName }: {
 
 function ChipNodeImpl({ data, selected }: NodeProps<ChipNodeType>) {
   const { ref, part } = data;
-  const { onChipMenu, unused, pinNet, selectedNet, netValues, macrocells } = useContext(NetContext);
+  const { onChipMenu, unused, pinNet, selectedNet, netValues, macrocells, variantTags } = useContext(NetContext);
+  const vt = variantTags[ref];
   const mc = macrocells[ref];
   const info = useMemo(() => artInfo(part), [part]);
   const wireClass = (num: string) => {
@@ -87,7 +88,7 @@ function ChipNodeImpl({ data, selected }: NodeProps<ChipNodeType>) {
   };
   return (
     <div className="chip-wrap" style={{ width: NODE_W, paddingLeft: GUTTER }}>
-      <div className={`chip${selected ? " chip-selected" : ""}`}
+      <div className={`chip${selected ? " chip-selected" : ""}${vt?.inactive ? " chip-inactive" : ""}`}
            style={{ width: CHIP_W, height: chipHeight(part) }}>
         <div className="chip-notch" />
         <div className="chip-header" onContextMenu={(e) => onChipMenu(e, ref)}
@@ -97,6 +98,12 @@ function ChipNodeImpl({ data, selected }: NodeProps<ChipNodeType>) {
           <div className="chip-title">{part.title}</div>
         </div>
         {part.warning && <div className="chip-warn" title={part.warning}>!</div>}
+        {vt && (
+          <div className="chip-variant" title={vt.inactive ? "Not fitted in the variant being viewed"
+                                                          : "Fitted only in these variants"}>
+            {vt.inactive ? "not in this variant · " : ""}{vt.label}
+          </div>
+        )}
         {mc && (
           <div className="chip-mc" title={`About ${mc.estimate} macrocells (see the bar in the report panel)`}>
             <span className="mcbar-swatch" style={{ background: slotColor(mc.slot) }} />

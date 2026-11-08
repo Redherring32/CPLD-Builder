@@ -20,6 +20,7 @@ import { PinoutView } from "./PinoutView";
 import { ImportDialog } from "./ImportDialog";
 import { BuildDialog } from "./BuildDialog";
 import { SetupDialog } from "./SetupDialog";
+import { VariantsDialog } from "./VariantsDialog";
 import { chipSlots } from "./MacrocellBar";
 
 const nodeTypes: NodeTypes = { chip: ChipNode };
@@ -64,7 +65,7 @@ function Editor() {
   const [showWires, setShowWires] = useState(false);
   const [view, setView] = useState<"chips" | "pinout">("chips");
   const [simNets, setSimNets] = useState<Record<string, number | null> | null>(null);
-  const [dialog, setDialog] = useState<"import" | "build" | "setup" | null>(null);
+  const [dialog, setDialog] = useState<"import" | "build" | "setup" | "variants" | null>(null);
   // Other panels (e.g. the simulator's "Yosys not found") can ask for Setup.
   useEffect(() => {
     const open = () => setDialog("setup");
@@ -379,10 +380,19 @@ function Editor() {
       [ref, { estimate: v.estimate, slot: slots[ref] ?? 0 }]));
   }, [gen, slots]);
 
+  const variantTags = useMemo(() => {
+    const opt = m.optionalChips(design);
+    const pins = design.variant_mode === "pins";
+    const active = design.variant || Object.keys(design.variants ?? {})[0];
+    return Object.fromEntries(Object.entries(opt).map(([ref, vs]) =>
+      [ref, { label: vs.join(" / "), inactive: !pins && !vs.includes(active) }]));
+  }, [design]);
+
   const netCtx = useMemo(() => ({
     pinNet, issues, selectedNet, select: setSelectedNet, netValues: simNets,
     unused: gen?.unused ?? {},
     macrocells: chipMacrocells,
+    variantTags,
     onPinMenu: (e: ReactMouseEvent, ref: string, pin: string) => {
       e.preventDefault(); e.stopPropagation();
       setMenu({ kind: "pin", x: e.clientX, y: e.clientY, ref, pin });
@@ -391,7 +401,7 @@ function Editor() {
       e.preventDefault(); e.stopPropagation();
       setMenu({ kind: "chip", x: e.clientX, y: e.clientY, ref });
     },
-  }), [pinNet, issues, selectedNet, simNets, gen?.unused, chipMacrocells]);
+  }), [pinNet, issues, selectedNet, simNets, gen?.unused, chipMacrocells, variantTags]);
 
   const deviceNames = [...new Set(devices.map((d) => d.device))];
   const packages = devices.filter((d) => d.device === design.device).map((d) => d.package);
@@ -435,7 +445,8 @@ function Editor() {
           {(deviceNames.includes(design.device) ? deviceNames : [design.device, ...deviceNames]).map((d) => {
             const info = devices.find((x) => x.device === d);
             return <option key={d} value={d}>
-              {info ? `${d} · ${info.macrocells} MC${info.vcc !== undefined && info.vcc < 5 ? " · 3.3 V" : ""}` : d}
+              {!info ? d : info.kind === "greenpak" ? `${d} · GreenPAK`
+                : `${d} · ${info.macrocells} MC${info.vcc !== undefined && info.vcc < 5 ? " · 3.3 V" : ""}`}
             </option>;
           })}
         </select>
@@ -443,11 +454,13 @@ function Editor() {
                 onChange={(e) => apply((d) => m.setDesignField(d, "package", e.target.value))}>
           {(packages.includes(design.package) ? packages : [design.package, ...packages]).map((p) => <option key={p}>{p}</option>)}
         </select>
-        <label className="small" title="Keep the 4 JTAG pins for in-circuit programming">
-          <input type="checkbox" checked={design.keep_jtag}
-                 onChange={(e) => apply((d) => m.setDesignField(d, "keep_jtag", e.target.checked))} />
-          {" "}JTAG
-        </label>
+        {(!deviceInfo || Object.keys(deviceInfo.jtag).length > 0) && (
+          <label className="small" title="Keep the 4 JTAG pins for in-circuit programming">
+            <input type="checkbox" checked={design.keep_jtag}
+                   onChange={(e) => apply((d) => m.setDesignField(d, "keep_jtag", e.target.checked))} />
+            {" "}JTAG
+          </label>
+        )}
         <span className="sep" />
         <div className="segmented" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === "chips"} className={view === "chips" ? "on" : ""}
@@ -481,6 +494,18 @@ function Editor() {
             Build…
           </button>
         )}
+        {design.variants && Object.keys(design.variants).length > 0 && (
+          design.variant_mode === "pins"
+            ? <span className="small muted" title="Every variant is in the CPLD; VAR_SEL pins choose">
+                Variants: VAR_SEL pins</span>
+            : <select aria-label="Variant" value={design.variant || Object.keys(design.variants)[0]}
+                      title="The variant shown, simulated and reported (Build makes every variant)"
+                      onChange={(e) => apply((d) => m.setActiveVariant(d, e.target.value))}>
+                {Object.keys(design.variants).map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+        )}
+        <button onClick={() => setDialog("variants")}
+                title="Boards where you fit one of several chips">Variants…</button>
         <button onClick={() => setDialog("setup")}
                 title="Yosys, the Microchip fitter and other optional tools">Setup…</button>
         <span className="path muted" title={path}>{path}</span>
@@ -565,7 +590,7 @@ function Editor() {
             {flash && <div className="flash" role="status">{flash}</div>}
           </div>
         )}
-        <ReportPanel design={design} gen={gen} genError={genError} slots={slots}
+        <ReportPanel design={design} device={deviceInfo} gen={gen} genError={genError} slots={slots}
                      selectedNet={selectedNet} onSelectNet={setSelectedNet}
                      onSimNets={setSimNets} />
       </main>
@@ -598,9 +623,14 @@ function Editor() {
                       onClose={() => setDialog(null)} />
       )}
       {dialog === "setup" && <SetupDialog onClose={() => setDialog(null)} />}
+      {dialog === "variants" && (
+        <VariantsDialog design={design} onClose={() => setDialog(null)}
+                        onApply={(v, mode) => { apply((d) => m.setVariants(d, v, mode)); setDialog(null); }} />
+      )}
       {dialog === "build" && buildCfg && (
         <BuildDialog design={design} config={buildCfg} onClose={() => setDialog(null)}
-                     onSetup={() => setDialog("setup")} />
+                     onSetup={() => setDialog("setup")}
+                     greenpak={deviceInfo?.kind === "greenpak"} />
       )}
       {menu && mi && (
         <ContextMenu x={menu.x} y={menu.y} title={mi.title} items={mi.items}

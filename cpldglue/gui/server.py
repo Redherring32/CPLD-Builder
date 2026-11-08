@@ -28,6 +28,9 @@ STATIC = Path(__file__).parent / "static"
 
 def make_handler(project: api.Project, builder: "api.Builder | None" = None):
     sim = api.SimSession()
+    import tempfile
+    from .. import greenpak
+    gp = greenpak.Session(Path(tempfile.mkdtemp(prefix="cpldglue_gp_")))
     jobs = deps.Jobs()
     kicad = api.KiCadImporter()
     builder = builder or api.Builder(None, None)
@@ -124,7 +127,8 @@ def make_handler(project: api.Project, builder: "api.Builder | None" = None):
                         return self._json(kicad.components(body["path"]))
                     if path == "/api/kicad/preview":
                         return self._json(kicad.preview(body["path"], body.get("refs", []),
-                                                        body.get("overrides"), design_of(body)))
+                                                        body.get("overrides"), design_of(body),
+                                                        variants=body.get("variants")))
                     if path == "/api/kicad/symbol":
                         from .. import kicad_symbol
                         e = kicad_symbol.build(design_of(body))
@@ -151,6 +155,12 @@ def make_handler(project: api.Project, builder: "api.Builder | None" = None):
                     return self._json(sim.step(self._body().get("steps", [{}])))
                 except Exception as e:
                     return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"}, 400)
+            if path == "/api/greenpak":
+                try:
+                    design = design_of(self._body())
+                    return self._json(gp.payload(design, generate.generate(design)))
+                except Exception as e:                       # report, don't crash
+                    return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
             if path == "/api/generate":
                 try:
                     body = self._body()

@@ -50,6 +50,40 @@ class Design:
     keep_jtag: bool = True
     # Free-form data for the GUI (positions etc.); ignored by the generator.
     layout: Dict[str, dict] = field(default_factory=dict)
+    # Variants: boards with "fit one of" chips. Each variant names the
+    # optional chips fitted in it; chips in no variant are always fitted.
+    #   variant_mode "build": one design per variant (one .jed each, same pins)
+    #   variant_mode "pins":  all variants in one CPLD, chosen by VAR_SEL pins
+    variants: Dict[str, List[str]] = field(default_factory=dict)
+    variant_mode: str = "build"
+    variant: str = ""               # the variant shown / simulated in build mode
+    variant_of: str = ""            # set on a design reduced to one variant
+
+    # ---------------- variants ----------------
+    def optional_refs(self) -> Dict[str, List[str]]:
+        """Optional chip -> the variants it is fitted in."""
+        out: Dict[str, List[str]] = {}
+        for v, refs in self.variants.items():
+            for ref in refs:
+                out.setdefault(ref, []).append(v)
+        return out
+
+    def active_variant(self) -> str:
+        if self.variant in self.variants:
+            return self.variant
+        return next(iter(self.variants), "")
+
+    def for_variant(self, name: str) -> "Design":
+        """This design as fitted in one variant: other optional chips removed."""
+        if name not in self.variants:
+            raise ValueError(f"no variant {name!r}; variants: {', '.join(self.variants)}")
+        drop = set(self.optional_refs()) - set(self.variants[name])
+        d = Design.from_json(self.to_json())
+        d.parts = {r: k for r, k in d.parts.items() if r not in drop}
+        for net in d.nets.values():
+            net.nodes = [n for n in net.nodes if n.ref not in drop]
+        d.variants, d.variant, d.variant_of = {}, "", name
+        return d
 
     # ---------------- JSON project files ----------------
     def to_json(self) -> str:
@@ -91,6 +125,9 @@ def load(path) -> Design:
 #   net     GND: U7.8 U7.15        (GND/VCC names become constants)
 #   pin     CPU_A13 12             (lock a signal to a pin)
 #   layout  U7 120 40              (GUI position of a chip)
+#   variant AxROM: U4A             (a variant and the optional chips it fits)
+#   variant-select pins            ("build": one .jed per variant; "pins": VAR_SEL pins)
+#   variant-active AxROM           (the variant shown in build mode)
 # Extra net flags: "auto" (unlabelled net), "const=0" / "const=1".
 # '#' starts a comment.
 def _strip_comment(raw: str) -> str:
@@ -187,6 +224,18 @@ def parse_text(text: str, default_name: str = "glue") -> Design:
             elif word == "layout":
                 ref, x, y = rest.split()[:3]
                 d.layout[ref] = {"x": float(x), "y": float(y)}
+            elif word == "variant":
+                name, tail = _take_name(rest)
+                head, sep, refs = tail.partition(":")
+                if not name or not sep:
+                    raise ValueError("expected: variant NAME: REF REF ...")
+                d.variants[name] = refs.split()
+            elif word == "variant-select":
+                if rest not in ("build", "pins"):
+                    raise ValueError("variant-select is 'build' or 'pins'")
+                d.variant_mode = rest
+            elif word == "variant-active":
+                d.variant = _take_name(rest)[0]
             else:
                 raise ValueError(f"unknown keyword {word!r}")
         except ValueError as e:
@@ -217,6 +266,12 @@ def to_text(d: Design) -> str:
             flags.append(f"const={net.const}")
         nodes = " ".join(f"{n.ref}.{n.pin}" for n in net.nodes)
         out.append(f"net {' '.join([_quote_name(net.name)] + flags)}: {nodes}")
+    if d.variants:
+        out.append("")
+        out += [f"variant {_quote_name(v)}: {' '.join(refs)}" for v, refs in d.variants.items()]
+        out.append(f"variant-select {d.variant_mode}")
+        if d.variant:
+            out.append(f"variant-active {_quote_name(d.variant)}")
     if d.pin_locks:
         out.append("")
         out += [f"pin {sig} {pin}" for sig, pin in d.pin_locks.items()]

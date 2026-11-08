@@ -53,6 +53,11 @@ export interface Design {
   pin_locks: Record<string, number>;
   keep_jtag: boolean;
   layout: Record<string, LayoutEntry>;
+  // Variants ("fit one of" chips): variant name -> optional chips fitted in it
+  variants?: Record<string, string[]>;
+  variant_mode?: "build" | "pins";   // one .jed per variant, or VAR_SEL pins
+  variant?: string;                  // variant shown / simulated in build mode
+  variant_of?: string;
 }
 
 export interface ProjectInfo {
@@ -74,6 +79,16 @@ export interface DeviceInfo {
   pin_count: number;
   nc?: number[];
   vcc?: number;
+  kind?: "cpld" | "greenpak";
+  resources?: Record<string, number>;
+  supply?: string;
+  note?: string;
+  out_only?: number[];
+  no_oe?: number[];
+  reserved?: Record<string, number>;
+  pin_names?: Record<string, string>;
+  style?: string;
+  sides?: number[] | null;
 }
 
 export interface GenNet {
@@ -88,6 +103,7 @@ export interface GenPort {
   name: string;
   direction: "input" | "output" | "inout";
   net: string;
+  drive?: string;          // outputs: "tri" (3-state), "oc", "" (push-pull)
   pin: number | null;
 }
 
