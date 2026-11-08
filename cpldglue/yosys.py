@@ -73,9 +73,23 @@ def run_script(script: str, cwd: Path, log_name: str = "yosys.log") -> str:
     return log
 
 
+def rel(path: Path, cwd: Path) -> str:
+    """A path as Yosys should see it from its working folder `cwd`.
+
+    Relative, because the WebAssembly Yosys (yowasp) maps /tmp on Linux to a
+    private folder of its own: an absolute /tmp/... path would point to the
+    wrong place. Falls back to absolute across Windows drives."""
+    try:
+        return Path(os.path.relpath(Path(path).resolve(), Path(cwd).resolve())).as_posix()
+    except ValueError:                                  # different drive
+        return Path(path).resolve().as_posix()
+
+
 def sim_netlist(verilog_files: List[Path], top: str, out_json: Path) -> Path:
     """Flatten to simple gates for cpldglue.sim (DFFs as $_DFFSR_PPP_)."""
-    reads = "\n".join(f"read_verilog {Path(f).resolve().as_posix()}" for f in verilog_files)
+    cwd = out_json.parent
+    cwd.mkdir(parents=True, exist_ok=True)
+    reads = "\n".join(f"read_verilog {rel(f, cwd)}" for f in verilog_files)
     script = f"""{reads}
 hierarchy -top {top}
 setattr -set keep 1 {top}/w:*
@@ -87,16 +101,17 @@ techmap
 opt -fast
 dfflegalize -cell $_DFFSR_PPP_ 01 -cell $_DLATCH_P_ 01
 opt_clean
-write_json {out_json.resolve().as_posix()}
+write_json {out_json.name}
 """
-    run_script(script, out_json.parent, out_json.stem + ".log")
+    run_script(script, cwd, out_json.stem + ".log")
     return out_json
 
 
 def library_netlist(out_json: Path, verilog: Optional[Path] = None) -> Path:
     """Every chip model as a separate simulation-ready module, in one run."""
     from .chips import HDL_DIR
-    src = (verilog or HDL_DIR / "chips.v").resolve().as_posix()
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    src = rel(verilog or HDL_DIR / "chips.v", out_json.parent)
     script = f"""read_verilog {src}
 proc
 tribuf
@@ -105,7 +120,7 @@ techmap
 opt -fast
 dfflegalize -cell $_DFFSR_PPP_ 01 -cell $_DLATCH_P_ 01
 opt_clean
-write_json {out_json.resolve().as_posix()}
+write_json {out_json.name}
 """
     run_script(script, out_json.parent, out_json.stem + ".log")
     return out_json
@@ -113,7 +128,8 @@ write_json {out_json.resolve().as_posix()}
 
 def check_synth(verilog: Path, top: str, workdir: Path) -> str:
     """Generic synthesis as a sanity check; returns the stat report."""
-    script = f"""read_verilog {verilog.resolve().as_posix()}
+    workdir.mkdir(parents=True, exist_ok=True)
+    script = f"""read_verilog {rel(verilog, workdir)}
 hierarchy -check -top {top}
 synth -flatten -top {top}
 tee -o stat.txt stat
@@ -125,9 +141,9 @@ tee -o stat.txt stat
 # ---------------------------------------------------------------------------
 # ATF15xx flow, after https://github.com/hoglet67/atf15xx_yosys
 # ---------------------------------------------------------------------------
-def atf_yosys_script(name: str, flow_dir: Path) -> str:
-    lib = (flow_dir / "cells.lib").resolve().as_posix()
-    tmap = (flow_dir / "techmap.v").resolve().as_posix()
+def atf_yosys_script(name: str, flow_dir: Path, cwd: Path = Path(".")) -> str:
+    lib = rel(flow_dir / "cells.lib", cwd)
+    tmap = rel(flow_dir / "techmap.v", cwd)
     return f"""read_liberty -lib {lib}
 read_verilog {name}.v
 tribuf
@@ -179,7 +195,8 @@ def run_atf_flow(name: str, outdir: Path, device: str, package: str,
         if not (flow_dir / f).exists():
             raise RuntimeError(f"{flow_dir} has no {f}; point --flow-dir at a "
                                f"checkout of github.com/hoglet67/atf15xx_yosys")
-    run_script(atf_yosys_script(name, flow_dir), outdir, "atf_yosys.log")
+    outdir.mkdir(parents=True, exist_ok=True)
+    run_script(atf_yosys_script(name, flow_dir, outdir), outdir, "atf_yosys.log")
     fitter = find_fitter(device, fitter_dir)
     if fitter is None:
         return (f"EDIF written to {outdir / (name + '.edif')}. Fitter not found "
