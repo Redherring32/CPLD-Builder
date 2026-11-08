@@ -128,7 +128,8 @@ export function saveProjectAs(path: string, design: Design) {
 /** The desktop app (pywebview) exposes native file dialogs and the window
  *  title; in a plain browser these fall back to a prompt / document.title. */
 type Bridge = { pick: (mode: "open" | "save", current: string) => Promise<string | null>;
-                title: (t: string) => Promise<void> };
+                title: (t: string) => Promise<void>;
+                copy: (text: string) => Promise<boolean> };
 function bridge(): Bridge | null {
   const w = window as unknown as { pywebview?: { api?: Bridge } };
   return w.pywebview?.api?.pick ? w.pywebview.api : null;
@@ -148,7 +149,26 @@ export function setTitle(t: string) {
   bridge()?.title(t).catch(() => {});
 }
 // The desktop bridge appears a moment after the page loads.
-window.addEventListener("pywebviewready", () => { if (lastTitle) setTitle(lastTitle); });
+if (typeof window !== "undefined")
+  window.addEventListener("pywebviewready", () => { if (lastTitle) setTitle(lastTitle); });
+
+export interface KicadSymbol { name: string; clipboard: string; library: string; warnings: string[]; labels: number }
+export function kicadSymbol(design: Design) {
+  return post<KicadSymbol>("api/kicad/symbol", { design });
+}
+
+/** Copy text: the page's clipboard API, else the desktop app's, else false. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch { /* blocked (e.g. Qt WebEngine): try the app bridge */ }
+  const b = bridge();
+  if (b?.copy) {
+    try { if (await b.copy(text)) return true; } catch { /* fall through */ }
+  }
+  return false;
+}
 
 export function runBuild(design: Design) {
   return post<{ ok: boolean; log: string; outdir?: string }>("api/build", { design });

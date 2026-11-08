@@ -29,6 +29,11 @@ Downloads are checked against fixed SHA-256 checksums and kept in
   Linux:   ~/.local/share/cpldglue
 Delete that folder to remove them.
 
+KiCad
+-----
+Pinout view -> Copy for KiCad copies the CPLD as a KiCad symbol wired up
+with net labels. Paste it into your schematic with Ctrl+V.
+
 Command line
 ------------
 cpldglue (cpldglue.exe on Windows) next to the app is the command-line tool:
@@ -36,3 +41,4 @@ cpldglue (cpldglue.exe on Windows) next to the app is the command-line tool:
   cpldglue setup yosys flow      download them
   cpldglue gen project.cg -o out --check
   cpldglue build project.cg -o out
+  cpldglue kicad-symbol project.cg -o kicad --copy

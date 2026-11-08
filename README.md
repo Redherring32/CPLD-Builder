@@ -80,6 +80,15 @@ pre-built into `cpldglue/gui/static/` and served from 127.0.0.1.
   a free pin) to lock it. *Lock all* freezes the current assignment before
   PCB layout. Locks are saved in the project and round-trip through `.pin`
   files.
+- **Copy for KiCad** (pinout view). Copies the CPLD to the clipboard as a
+  KiCad symbol already wired up, in the style of the TinyTendo schematic:
+  a short wire on each pin with a local net label naming its net, VCC/GND
+  labels on the power pins (+3V3 for ASV parts), TDI/TMS/TCK/TDO labels for
+  the programming header, unused dedicated inputs tied to GND, and
+  no-connect flags on unused I/O. Paste it into a schematic with Ctrl+V; the
+  labels join the nets of the same name. The symbol uses the package's
+  standard KiCad footprint. If the clipboard is blocked, a box shows the
+  text to copy by hand.
 - **Report / Verilog / Pin file tabs.** The same output as the command
   line, updated on every edit.
 - **Simulate tab.** Switches for inputs, lights for outputs (Z = released
@@ -133,6 +142,18 @@ edit and feed back to `gen`. Useful options:
 | `--no-jtag` | use the 4 JTAG pins as I/O (loses in-circuit programming) |
 | `--part U8=74x368` | override a schematic value cpldglue can't recognise |
 | `--check` | run a generic Yosys synthesis as a sanity check |
+
+### KiCad symbol
+
+```bash
+python -m cpldglue kicad-symbol build/tinytendo/tinytendo_glue.json -o kicad --copy
+```
+
+Writes `NAME.kicad_sym` (a one-symbol library to add to your project) and
+`NAME-paste.txt` (the wired-up snippet that **Copy for KiCad** puts on the
+clipboard); `--copy` also copies the snippet. Nets KiCad named
+automatically (`Net-(U7-Pad2)`) get a note: label them in the schematic so
+the pasted label joins them.
 
 ### Building a .jed
 

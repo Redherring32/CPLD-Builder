@@ -125,6 +125,12 @@ def make_handler(project: api.Project, builder: "api.Builder | None" = None):
                     if path == "/api/kicad/preview":
                         return self._json(kicad.preview(body["path"], body.get("refs", []),
                                                         body.get("overrides"), design_of(body)))
+                    if path == "/api/kicad/symbol":
+                        from .. import kicad_symbol
+                        e = kicad_symbol.build(design_of(body))
+                        return self._json({"name": e.name, "clipboard": e.clipboard,
+                                           "library": e.library, "warnings": e.warnings,
+                                           "labels": e.labels})
                     if path == "/api/build/config":
                         return self._json(builder.config(design_of(body)))
                     if path == "/api/build":

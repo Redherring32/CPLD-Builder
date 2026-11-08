@@ -104,6 +104,13 @@ def main(argv=None) -> int:
                     help="atf15xx_yosys checkout (default: the downloaded copy)")
     gu.add_argument("--fitter-dir", type=Path, help="folder with fit1502.exe etc.")
 
+    ks = sub.add_parser("kicad-symbol", help="KiCad symbol of the CPLD, wired with net labels")
+    ks.add_argument("project", type=Path)
+    ks.add_argument("-o", "--out", type=Path, default=Path("."),
+                    help="folder for NAME.kicad_sym and NAME-paste.txt (default: here)")
+    ks.add_argument("--copy", action="store_true",
+                    help="also put the schematic snippet on the clipboard")
+
     st = sub.add_parser("setup", help="show optional tools, or download them")
     st.add_argument("what", nargs="*", metavar="{yosys,flow,fitter}",
                     help="what to download (nothing = just show status)")
@@ -128,6 +135,25 @@ def main(argv=None) -> int:
         for d in deps.status():
             mark = "found" if d["found"] else "missing"
             print(f"{d['title']:<40} {mark:<8} {d['where'] or d['download']}")
+        return 0
+    if a.cmd == "kicad-symbol":
+        from . import kicad_symbol
+        try:
+            e = kicad_symbol.build(dsg.load(a.project))
+        except (ValueError, KeyError) as err:
+            print(f"error: {err}", file=sys.stderr)
+            return 2
+        a.out.mkdir(parents=True, exist_ok=True)
+        (a.out / f"{e.name}.kicad_sym").write_text(e.library, encoding="utf-8")
+        (a.out / f"{e.name}-paste.txt").write_text(e.clipboard, encoding="utf-8")
+        print(f"Wrote {a.out / (e.name + '.kicad_sym')} (symbol library) and "
+              f"{e.name}-paste.txt (paste into a schematic: {e.labels} labels)")
+        for w in e.warnings:
+            print(f"note: {w}")
+        if a.copy:
+            from .app import copy_to_clipboard
+            print("Copied to the clipboard." if copy_to_clipboard(e.clipboard)
+                  else "Could not reach the clipboard; use the -paste.txt file.")
         return 0
     if a.cmd == "gui":
         from .gui.server import serve

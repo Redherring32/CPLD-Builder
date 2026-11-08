@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { DragEvent } from "react";
 import type { Design, DeviceInfo, GenPort, GenResult } from "./types";
+import * as api from "./api";
 
 export const SIGNAL_MIME = "application/x-cpldglue-signal";
 
@@ -53,6 +54,26 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [manual, setManual] = useState<string | null>(null);
+
+  const copyKicad = async () => {
+    setCopying(true);
+    try {
+      const k = await api.kicadSymbol(design);
+      const note = k.warnings.length ? ` Note: ${k.warnings.join(" ")}` : "";
+      if (await api.copyText(k.clipboard)) {
+        onFlash(`Copied ${design.device} with ${k.labels} labels: paste into KiCad's schematic editor with Ctrl+V.${note}`);
+      } else {
+        setManual(k.clipboard);
+        if (note) onFlash(note.trim());
+      }
+    } catch (e) {
+      onFlash(`Could not make the KiCad symbol: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setCopying(false);
+    }
+  };
   const [zoom, setZoom] = useState<"fit" | "full" | null>(null);   // null = by size
   const ports = gen?.ports ?? [];
   const portByName = useMemo(() => Object.fromEntries(ports.map((p) => [p.name, p])), [ports]);
@@ -214,7 +235,27 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
           <button onClick={() => onSetLocks({})} disabled={!Object.keys(design.pin_locks).length}>
             Unlock all
           </button>
+          <button onClick={copyKicad} disabled={!gen?.ok || copying} data-testid="copy-kicad"
+                  title="Copy the CPLD as a KiCad symbol with wires and net labels; paste it into your schematic with Ctrl+V">
+            {copying ? "Copying…" : "Copy for KiCad"}
+          </button>
         </div>
+        {manual && (
+          <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) setManual(null); }}>
+            <div className="modal" role="dialog" aria-modal="true" aria-label="KiCad symbol">
+              <div className="modal-head">
+                <h2>KiCad symbol</h2>
+                <button className="iconbtn" onClick={() => setManual(null)} aria-label="Close">×</button>
+              </div>
+              <p className="small">The clipboard isn't available here. Press Ctrl+C to copy the
+                text below, then paste it into a KiCad schematic with Ctrl+V.</p>
+              <textarea className="code kicad-text" readOnly value={manual} aria-label="KiCad schematic text"
+                        ref={(t) => { if (t) { t.focus(); t.select(); } }} />
+              <div className="modal-foot"><span className="spacer" />
+                <button className="primary" onClick={() => setManual(null)}>Done</button></div>
+            </div>
+          </div>
+        )}
         <ul className="siglist">
           {[...ports].sort((a, b) => a.name.localeCompare(b.name)).map((p) => {
             const locked = design.pin_locks[p.name] !== undefined;

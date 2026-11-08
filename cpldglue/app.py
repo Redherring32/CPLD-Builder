@@ -25,7 +25,8 @@ from typing import Optional
 
 from . import deps
 
-CLI_COMMANDS = {"parts", "devices", "kicad", "gen", "build", "gui", "setup", "_yosys"}
+CLI_COMMANDS = {"parts", "devices", "kicad", "gen", "build", "gui", "setup", "kicad-symbol",
+                "_yosys"}
 
 
 def resource_dir() -> Path:
@@ -71,9 +72,49 @@ class Bridge:
             return None
         return r if isinstance(r, str) else r[0]
 
+    def copy(self, text: str) -> bool:
+        """Put text on the system clipboard (the page's own clipboard access
+        can be blocked inside the app window)."""
+        return copy_to_clipboard(text)
+
     def title(self, text: str) -> None:
         if self._window is not None:
             self._window.set_title(text)
+
+
+def copy_to_clipboard(text: str) -> bool:
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        k32, u32 = ctypes.windll.kernel32, ctypes.windll.user32
+        k32.GlobalAlloc.restype = wintypes.HGLOBAL
+        k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        k32.GlobalLock.restype = ctypes.c_void_p
+        k32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        k32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        u32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        data = text.encode("utf-16-le") + b"\0\0"
+        h = k32.GlobalAlloc(0x0002, len(data))          # GMEM_MOVEABLE
+        if not h:
+            return False
+        ctypes.memmove(k32.GlobalLock(h), data, len(data))
+        k32.GlobalUnlock(h)
+        if not u32.OpenClipboard(None):
+            return False
+        try:
+            u32.EmptyClipboard()
+            return bool(u32.SetClipboardData(13, h))    # CF_UNICODETEXT
+        finally:
+            u32.CloseClipboard()
+    import subprocess
+    for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "-b", "-i"]):
+        if shutil.which(cmd[0]):
+            try:
+                subprocess.run(cmd, input=text.encode("utf-8"), check=True, timeout=5)
+                return True
+            except (OSError, subprocess.SubprocessError):
+                pass
+    return False
 
 
 def main(argv=None) -> int:

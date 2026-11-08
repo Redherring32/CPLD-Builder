@@ -36,6 +36,7 @@ class TopPort:
     name: str        # Verilog port name
     direction: str   # input / output / inout
     net: str         # original net name
+    drive: str = ""  # outputs: "tri" (3-state), "oc" (open collector), "" (push-pull)
 
 
 @dataclass
@@ -321,7 +322,8 @@ def generate(design: Design, assign: bool = True) -> Result:
             if net.external:
                 direction = "inout" if loads else "output"
                 port = names.take(sig)
-                r.ports.append(TopPort(port, direction, net.name))
+                drive = "oc" if all(p.kind == "oc" for _, p in tri) else "tri"
+                r.ports.append(TopPort(port, direction, net.name, drive))
                 logic.append(f"    assign {port} = {mux};")
                 net_value[net.name] = port
             else:
