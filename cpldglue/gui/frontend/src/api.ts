@@ -1,0 +1,155 @@
+import type { Design, DeviceInfo, GenResult, Part, ProjectInfo } from "./types";
+
+async function json<T>(res: Response): Promise<T> {
+  const body = await res.json();
+  if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+  return body as T;
+}
+
+export async function getParts(): Promise<Part[]> {
+  return (await json<{ parts: Part[] }>(await fetch("api/parts"))).parts;
+}
+
+export async function getDevices(): Promise<DeviceInfo[]> {
+  return (await json<{ devices: DeviceInfo[] }>(await fetch("api/devices"))).devices;
+}
+
+export async function getProject(): Promise<ProjectInfo> {
+  return json<ProjectInfo>(await fetch("api/project"));
+}
+
+export async function generate(design: Design): Promise<GenResult> {
+  return json<GenResult>(
+    await fetch("api/generate", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ design }),
+    }),
+  );
+}
+
+export type SaveResult = { conflict: boolean; mtime: number };
+
+export async function saveProject(design: Design, baseMtime: number,
+                                  force = false): Promise<SaveResult> {
+  const res = await fetch("api/project", {
+    method: "PUT",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ design, base_mtime: baseMtime, force }),
+  });
+  const body = await res.json();
+  if (res.status === 409) return body as SaveResult;
+  if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+  return body as SaveResult;
+}
+
+export interface SimPort { name: string; direction: "input" | "output" | "inout"; net: string }
+export interface SimState {
+  ok: boolean;
+  error?: string;
+  values: Record<string, number | null>;
+  nets: Record<string, number | null>;
+  contention: boolean;
+  trace?: Record<string, number | null>[];
+}
+export interface SimBuild extends SimState { ports: SimPort[] }
+
+export async function simBuild(design: Design, fresh = false): Promise<SimBuild> {
+  const res = await fetch("api/sim/build", {
+    method: "POST", headers: JSON_HEADERS,
+    body: JSON.stringify({ design, fresh }),
+  });
+  return (await res.json()) as SimBuild;
+}
+
+export async function simStep(steps: Record<string, number | null>[]): Promise<SimState> {
+  return json<SimState>(await fetch("api/sim/step", {
+    method: "POST", headers: JSON_HEADERS,
+    body: JSON.stringify({ steps }),
+  }));
+}
+
+// ---- KiCad import ----
+export interface KiComponent { ref: string; value: string; part: string | null }
+export interface KiPreview {
+  pins: number; capacity: number | null; errors: string[]; warnings: string[]; design: Design;
+}
+
+/** Every write request carries X-Cpldglue, which a web page on another site
+ *  can't add without a CORS preflight the server never approves. */
+const JSON_HEADERS = { "Content-Type": "application/json", "X-Cpldglue": "1" };
+
+async function post<T>(url: string, body: unknown): Promise<T> {
+  return json<T>(await fetch(url, {
+    method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body),
+  }));
+}
+
+export async function kicadFind(): Promise<string[]> {
+  return (await json<{ files: string[] }>(await fetch("api/kicad/find"))).files;
+}
+
+export function kicadComponents(path: string) {
+  return post<{ path: string; components: KiComponent[] }>("api/kicad/components", { path });
+}
+
+export function kicadPreview(path: string, refs: string[], overrides: Record<string, string>,
+                             design: Design) {
+  return post<KiPreview>("api/kicad/preview", { path, refs, overrides, design });
+}
+
+// ---- Build ----
+export interface BuildConfig { enabled: boolean; flow_ok: boolean; flow_dir: string | null; fitter: string | null }
+export function buildConfig(design: Design) {
+  return post<BuildConfig>("api/build/config", { design });
+}
+export interface DepInfo {
+  id: string; title: string; found: boolean; where: string | null;
+  needed_for: string; download: string; can_fetch: boolean;
+  installer?: string | null; url?: string;
+}
+export interface DepJob { state: "running" | "done" | "error"; done: number; total: number | null; message: string }
+export async function deps() {
+  return json<{ deps: DepInfo[]; jobs: Record<string, DepJob> }>(await fetch("api/deps"));
+}
+export function fetchDep(id: string) {
+  return post<DepJob>("api/deps/fetch", { id });
+}
+export function openInstaller() {
+  return post<{ ok: boolean }>("api/deps/installer", {});
+}
+export function openProject(path: string) {
+  return post<ProjectInfo>("api/project/open", { path });
+}
+export function saveProjectAs(path: string, design: Design) {
+  return post<ProjectInfo>("api/project/saveas", { path, design });
+}
+
+/** The desktop app (pywebview) exposes native file dialogs and the window
+ *  title; in a plain browser these fall back to a prompt / document.title. */
+type Bridge = { pick: (mode: "open" | "save", current: string) => Promise<string | null>;
+                title: (t: string) => Promise<void> };
+function bridge(): Bridge | null {
+  const w = window as unknown as { pywebview?: { api?: Bridge } };
+  return w.pywebview?.api?.pick ? w.pywebview.api : null;
+}
+export async function pickPath(mode: "open" | "save", current: string): Promise<string | null> {
+  const b = bridge();
+  if (b) return b.pick(mode, current);
+  const p = window.prompt(mode === "open"
+    ? "Path of the project to open (.cg or .json; a new name starts an empty project):"
+    : "Save the project as (.cg or .json):", current);
+  return p && p.trim() ? p.trim() : null;
+}
+let lastTitle = "";
+export function setTitle(t: string) {
+  lastTitle = t;
+  document.title = t;
+  bridge()?.title(t).catch(() => {});
+}
+// The desktop bridge appears a moment after the page loads.
+window.addEventListener("pywebviewready", () => { if (lastTitle) setTitle(lastTitle); });
+
+export function runBuild(design: Design) {
+  return post<{ ok: boolean; log: string; outdir?: string }>("api/build", { design });
+}

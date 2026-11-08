@@ -1,0 +1,271 @@
+# cpldglue
+
+Merge 74-series and CD4000-series glue logic into one Microchip ATF15xx
+CPLD. You pick the chips; cpldglue reads how they are wired (from a
+KiCad schematic or a small text netlist) and generates:
+
+- one self-contained Verilog file (top level plus the chip models it uses),
+- a pin assignment (`.pin` file and `//PIN:` comments),
+- a report: pins used, internal nets, warnings,
+- optionally an EDIF netlist and a `.jed` via the Yosys + Microchip fitter flow.
+
+Nets that only join chips together become internal wires and use no pins.
+Tied-high/low inputs become constants. Unused gates are left out: a gate
+whose output goes nowhere costs no logic, and its inputs get no CPLD pins.
+
+## Desktop app
+
+Download `CPLD-Builder-<version>-windows-x64.zip` or
+`CPLD-Builder-<version>-linux-x64.tar.gz` from the GitHub release (or the
+Actions run's artifacts), unpack it and run `CPLD-Builder` (Linux: run
+`./install.sh` once for a menu entry). No Python needed. It opens the editor
+below in its own window; **Open…**, **Recent** and **Save as…** pick projects,
+and it reopens the last one.
+
+**Setup…** in the toolbar lists the optional tools and downloads them on
+request, each checked against a fixed SHA-256 checksum and kept in your user
+folder (`%LOCALAPPDATA%\cpldglue` or `~/.local/share/cpldglue`):
+
+| Tool | For | Download |
+|---|---|---|
+| Yosys (yowasp-yosys, WebAssembly) | Simulate, synthesis check, Build | ~25 MB from PyPI |
+| atf15xx_yosys flow files | Build | ~30 KB from GitHub (pinned commit) |
+| Microchip fitters | Build (the `.jed`) | ProChip 5.0.1, 224 MB from microchip.com; the app opens Microchip's installer, which you run (and accept its licence). Linux needs Wine. |
+| KiCad | Import KiCad… | not downloaded; install KiCad 7+ |
+
+The same from the command line: `cpldglue setup` shows the status,
+`cpldglue setup yosys flow fitter` downloads.
+
+Building the app yourself: `pip install -r packaging/requirements-build.txt`,
+then `python packaging/build.py` (on the platform you're building for). The
+GitHub workflow `.github/workflows/build.yml` does this for Windows
+and Linux on every push, and attaches both to a release when you push a tag
+like `v0.2.0`.
+
+## Install (from source)
+
+Python 3.9 or newer. For simulation and builds, either let **Setup…** /
+`cpldglue setup yosys` download Yosys, or install it yourself:
+
+```bash
+pip install yowasp-yosys
+```
+
+A native `yosys` on your PATH works too. To import KiCad schematics directly,
+KiCad 7+ must be installed (`kicad-cli` is found automatically on Windows).
+
+## Editor (GUI)
+
+```bash
+python -m cpldglue gui examples/tinytendo.cg
+```
+
+This opens a local editor in your browser. The project file can be a `.cg`
+netlist or a `.json` project, and it may not exist yet: `gui myboard.cg`
+starts empty and Save creates it. Only Python is needed. The page is
+pre-built into `cpldglue/gui/static/` and served from 127.0.0.1.
+
+- **Chips view.** Each chip shows the gates inside it: gate symbols wired
+  to their pins for simple logic and buffers, labelled blocks for
+  flip-flops, decoders, counters and shift registers. Gates the design
+  doesn't use are faded; they are left out of the CPLD. Drag parts in
+  from the library, then drag from pin to pin
+  to wire them. Click a net label to rename it, mark it as going off-chip
+  (needs a CPLD pin), or make it a constant. Right-click a pin to tie it
+  high/low or make it a CPLD pin. Pins with problems in the report are
+  underlined. Undo/redo, Tidy (re-grid), optional wire drawing, Ctrl+S to
+  save. Press `?` for all shortcuts.
+- **Pinout view.** A drawing of the package with JTAG, power and
+  input-only pins marked. Drag a signal onto a pin (or select it and click
+  a free pin) to lock it. *Lock all* freezes the current assignment before
+  PCB layout. Locks are saved in the project and round-trip through `.pin`
+  files.
+- **Report / Verilog / Pin file tabs.** The same output as the command
+  line, updated on every edit.
+- **Simulate tab.** Switches for inputs, lights for outputs (Z = released
+  or unknown), pulse buttons, a free-running clock, and a waveform of the
+  last 64 steps. Net values also show on the chip view. Needs Yosys.
+- **Import KiCad…** Lists schematics near the project. Tick chips and
+  watch the pin count before importing. Undo restores the previous chips.
+- **Build…** Runs the same flow as `cpldglue build` and writes to `build/`
+  next to the project. It uses the tools from **Setup…** (or `--flow-dir` /
+  `--fitter-dir` given to `cpldglue gui`) and says what's missing.
+
+If the project file changes on disk while the editor is open, the editor
+reloads it, or asks first when you have unsaved edits.
+
+To work on the editor itself: `cd cpldglue/gui/frontend`, `npm install`,
+then `npm run dev` (with `python -m cpldglue gui PROJECT --no-browser`
+running), `npm test`, and `npm run build` to refresh `static/`.
+
+## Command line
+
+List the supported parts and devices:
+
+```bash
+python -m cpldglue parts
+```
+
+```bash
+python -m cpldglue devices
+```
+
+Import chips straight from a KiCad schematic:
+
+```bash
+python -m cpldglue kicad path/to/TinyTendo-schematic.kicad_sch --refs U7 U8 U9 --name tinytendo_glue --device ATF1502AS --package PLCC44 -o build/tinytendo --check
+```
+
+Or describe the wiring by hand (see [examples/tinytendo.cg](examples/tinytendo.cg)):
+
+```bash
+python -m cpldglue gen examples/tinytendo.cg -o build/tinytendo
+```
+
+Either way, `build/tinytendo/tinytendo_glue.json` is a project file you can
+edit and feed back to `gen`. Useful options:
+
+| Option | Meaning |
+|---|---|
+| `--lock SIGNAL=PIN` | pin a signal to a pin (repeatable) |
+| `--pins FILE` | lock pins from a `.pin` file, or a generated `.v` (its `//PIN:` lines) |
+| `--device`, `--package` | target part, e.g. `--device ATF1504AS --package PLCC84` |
+| `--no-jtag` | use the 4 JTAG pins as I/O (loses in-circuit programming) |
+| `--part U8=74x368` | override a schematic value cpldglue can't recognise |
+| `--check` | run a generic Yosys synthesis as a sanity check |
+
+### Building a .jed
+
+```bash
+python -m cpldglue build build/tinytendo/tinytendo_glue.json -o build/tinytendo
+```
+
+It uses the flow files and fitters from `cpldglue setup flow fitter`. To use
+your own copies instead, pass `--flow-dir` (a checkout of
+<https://github.com/hoglet67/atf15xx_yosys>: cells.lib, techmap.v) and
+`--fitter-dir` (the folder with `fit1502.exe` … and `aprim.lib` from
+Microchip's ProChip or WinCUPL).
+
+**The fitter step is not yet tested.** The Yosys stage (Verilog → EDIF
+with the ATF cell library) has been run; the Microchip fitter hasn't. Two
+things to confirm on the first real build:
+1. That the fitter honours the pin assignment. cpldglue writes both
+   `NAME.pin` and `//PIN:` comments, as the reference flow does, and passes
+   `-preassign keep`. Compare the pin list in `NAME.fit` against `NAME.pin`.
+2. That `-tech`/`-device` are right for your part. cpldglue passes the AS
+   or ASV name (an ASL/ASVL part builds as AS/ASV, as the fitter's own help
+   lists only those) and the package name, e.g. `-tech ATF1504AS -device PLCC84`.
+
+## Devices
+
+The whole ATF15xx family, in every package Microchip lists:
+
+| Device | Macrocells | Packages | Supply |
+|---|---|---|---|
+| ATF1502AS / ASL | 32 | PLCC44, TQFP44 | 5 V |
+| ATF1502ASV | 32 | PLCC44, TQFP44 | 3.3 V |
+| ATF1504AS / ASL | 64 | PLCC44, TQFP44, PLCC68, PLCC84, TQFP100, PQFP100 | 5 V |
+| ATF1504ASV / ASVL | 64 | same as AS | 3.3 V |
+| ATF1508AS / ASL | 128 | PLCC84, TQFP100, PQFP100, PQFP160 | 5 V |
+| ATF1508ASV / ASVL | 128 | same as AS | 3.3 V |
+
+`python -m cpldglue devices` lists the I/O count of each. The pin tables
+(I/O, JTAG, the four dedicated inputs, VCC/GND and no-connects) are
+generated from Atmel's BSDL files by `tools/bsdl_to_pins.py` into
+`cpldglue/pintables.py`; the AS and ASV parts share pinouts. Some packages
+(PLCC68, PQFP100/160) may be hard to find now; check stock before designing
+one in.
+
+The report also gives a rough macrocell count: one per output pin plus one
+per flip-flop/latch bit in the chips you merged. It's an upper estimate
+(a register that drives a pin shares that pin's macrocell); the fitter
+report is the real figure. ASV/ASVL parts get a note that they run from
+3.3 V. Check 5 V input tolerance in the datasheet before using one on a 5 V board.
+
+## Text netlist format (.cg)
+
+```
+design  NAME
+device  ATF1502AS PLCC44
+jtag    off                  # optional: free the JTAG pins
+part    U7 74HC139           # any recognisable value: 74LS139, SN74HC139N, 139
+net     CPU_A13 ext: U7.2    # "ext" = the net also goes off-chip, so it needs a pin
+net     X: U7.1 U7.11        # internal net
+net     GND: U7.8 U7.15      # GND/VCC/VSS/VDD names become constants
+net     "Net-(J1-Pad 1)": U7.3   # quote names with spaces, ':' or '#'
+net     N4 auto: U7.6 U7.10  # "auto" = unlabelled net; "const=0"/"const=1" force a constant
+pin     CPU_A13 12           # lock a pin
+layout  U7 120 40            # editor position (written by the GUI)
+```
+
+## How nets are resolved
+
+| Situation | Result |
+|---|---|
+| Power net | constant 0/1 |
+| No driver, goes off-chip | input pin |
+| No driver, internal, labelled | input pin (with a note) |
+| No driver, internal, unlabelled | tied low (with a warning) |
+| Only goes to unused gates | dropped; no pin (with a note) |
+| One totem-pole output | wire; output pin if it goes off-chip |
+| Several 3-state / open-collector outputs | priority mux (CPLDs have no internal 3-state); off-chip: 3-state pin, or inout if the CPLD also reads it |
+| Totem-pole output plus any other driver | error: contention |
+
+## Supported parts
+
+74x00 02 04 05 06 07 08 10 11 14 20 32 74 86 125 126 138 139 153 157 161
+163 164 165 174 175 240 244 245 273 367 368 373 374 377 540 541 573 574 595,
+and CD4021. Any logic family prefix works (LS, HC, HCT, ALS, F...).
+
+Parts that can't be put in a CPLD at all: one-shots ('121, '123), anything
+that relies on external RC timing, analog parts. The tool warns about
+partial fits: Schmitt-trigger hysteresis ('14) is lost, open-collector parts
+need their pull-ups kept, and high-voltage open-collector parts ('06, '07)
+can't be pulled above VCC.
+
+Adding a part: add its pinout to `_DEFS` in [cpldglue/chips.py](cpldglue/chips.py)
+its model to [cpldglue/hdl/chips.v](cpldglue/hdl/chips.v), and its gates to
+[cpldglue/units.py](cpldglue/units.py) (used for leaving out unused gates and
+for the drawing), then add a reference check to `tests/test_chips.py`. The
+tests check that the units cover every pin and that the frontend drawing has
+no crossing wires (`cpldglue/gui/frontend/src/fixtures/parts.json` holds a
+copy of `/api/parts` for that test; refresh it when you add a part).
+
+## Tests
+
+```bash
+python -m unittest discover -s tests
+```
+
+```bash
+cd cpldglue/gui/frontend && npm test
+```
+
+- Every chip model is checked against an independent Python description of
+  its datasheet behaviour, using Yosys and the built-in gate simulator
+  (`cpldglue/sim.py`).
+- The TinyTendo merge (U7 + U8 + U9) is compared vector by vector with a
+  hand-written reference, both from the `.cg` example and straight from the
+  KiCad schematic.
+- Generator rules are tested: internal 3-state → mux, wired-AND
+  open-collector, contention errors, running out of pins.
+- Devices: every package's pins are each I/O, input-only, power or NC
+  exactly once; spot checks against the BSDL files; pin assignment fills
+  every package exactly; the macrocell counts match the chip models.
+- Desktop app: download checksum handling, open / save as / recent
+  projects, the first-run example copy (`tests/test_app.py`); the server
+  refuses writes without its header and requests for other host names.
+- GUI backend: API, saving and conflict detection, `.cg`/`.json` round trips,
+  pin-lock round trips through `.pin` files, the simulator session (TinyTendo
+  decode and controller reads, a clocked counter), KiCad import, and the
+  build button's error paths.
+- Editor model (TypeScript): every editing operation, undo/redo, and
+  rebuilding the TinyTendo example using only editor operations.
+
+## Things to keep in mind
+
+- Timing: a CPLD is faster than LS/HC parts. Designs that accidentally depend
+  on slow gates (pulse stretching, races) can behave differently.
+- Drive: ATF15xx pins sink about 8 mA. Fine for HC/HCT loads; check before
+  replacing LS parts that drive heavy buses.
+- Floating internal 3-state nets read 1, as if pulled up.

@@ -1,0 +1,112 @@
+# Builds the CPLD-Builder desktop app for Windows and Linux.
+#
+# Every push to main and every pull request runs the tests and uploads the
+# app archives as workflow artifacts (Actions tab -> run -> Artifacts).
+# Pushing a tag like `v0.2.0` also attaches them to a GitHub release.
+name: CPLD-Builder
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cpldglue/gui/frontend/package-lock.json
+
+      - name: Linux libraries for Qt WebEngine
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libnss3 libxcomposite1 \
+            libxdamage1 libxrandr2 libxtst6 libasound2 xvfb
+
+      - name: Editor (frontend) tests and build
+        working-directory: cpldglue/gui/frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Python tests
+        run: |
+          python -m pip install yowasp-yosys==0.70.0.0.post1259
+          python -m unittest discover -s tests
+
+      - name: Build the app
+        run: |
+          python -m pip install -r packaging/requirements-build.txt
+          python packaging/build.py
+
+      - name: Smoke test (command-line tool, downloads, Yosys flow)
+        run: |
+          export CPLDGLUE_HOME="$RUNNER_TEMP/cg"
+          dist/CPLD-Builder/cpldglue devices | head -3
+          dist/CPLD-Builder/cpldglue setup yosys flow
+          dist/CPLD-Builder/cpldglue build examples/tinytendo.cg -o "$RUNNER_TEMP/out"
+          test -f "$RUNNER_TEMP/out/tinytendo_glue.edif"
+
+      - name: Smoke test (the app starts and serves the editor)
+        run: |
+          export CPLDGLUE_HOME="$RUNNER_TEMP/cg"
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a dist/CPLD-Builder/CPLD-Builder examples/tinytendo.cg --port 8799 &
+          else
+            dist/CPLD-Builder/CPLD-Builder.exe examples/tinytendo.cg --port 8799 &
+          fi
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8799/api/project > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8799/api/project | head -c 200; echo
+          curl -sf http://127.0.0.1:8799/ | grep -q '<div id="root">'
+          kill %1 || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CPLD-Builder-${{ runner.os }}
+          path: |
+            dist/CPLD-Builder-*.zip
+            dist/CPLD-Builder-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*

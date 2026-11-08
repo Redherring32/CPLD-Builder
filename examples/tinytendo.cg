@@ -1,0 +1,43 @@
+# TinyTendo motherboard: U7 (74HC139) and U8/U9 (74HC368) in one CPLD.
+# Same wiring as Hardware/Motherboard/TinyTendo-schematic.kicad_sch.
+# "ext" marks nets that also go to chips that stay on the board.
+
+design  tinytendo_glue
+device  ATF1502AS PLCC44
+
+part U7 74HC139
+part U8 74HC368
+part U9 74HC368
+
+# Address decode (U7)
+net CPU-A13 ext: U7.2
+net CPU-A14 ext: U7.3
+net CPU-A15 ext: U7.13
+net M2 ext: U7.14
+net WRAM-~{CE} ext: U7.4
+net PPU-~{CE} ext: U7.5
+net ~{ROMSEL} ext: U7.9
+net Net-(U7A-E): U7.1 U7.11          # half B output 1 enables half A
+
+# Controller ports (U8, U9)
+net ~{OE1} ext: U9.1
+net ~{OE2} ext: U8.1 U9.15
+net 4016-D0 ext: U9.2
+net 4016-D3 ext: U9.4
+net 4016-D4 ext: U9.6
+net 4017-D0 ext: U8.2
+net 4017-D3 ext: U8.4
+net 4017-D4 ext: U8.6
+net CPU-D0 ext: U8.3 U9.3
+net CPU-D1 ext: U9.13 U9.9
+net CPU-D2 ext: U9.11
+net CPU-D3 ext: U8.5 U9.5
+net CPU-D4 ext: U8.7 U9.7
+
+# Spare U8 gate used as an inverter
+net PPU-A13 ext: U8.12
+net PPU-~{A13} ext: U8.11
+
+# Power and tie-offs
+net GND: U7.15 U7.8 U8.10 U8.14 U8.15 U8.8 U9.8
+net VCC: U7.16 U8.16 U9.10 U9.12 U9.14 U9.16

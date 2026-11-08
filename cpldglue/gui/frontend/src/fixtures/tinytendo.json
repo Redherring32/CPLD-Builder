@@ -1,0 +1,384 @@
+{
+  "name": "tinytendo_glue",
+  "parts": {
+    "U7": "74x139",
+    "U8": "74x368",
+    "U9": "74x368"
+  },
+  "nets": {
+    "CPU-A13": {
+      "name": "CPU-A13",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "2"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "CPU-A14": {
+      "name": "CPU-A14",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "3"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "CPU-A15": {
+      "name": "CPU-A15",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "13"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "M2": {
+      "name": "M2",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "14"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "WRAM-~{CE}": {
+      "name": "WRAM-~{CE}",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "4"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "PPU-~{CE}": {
+      "name": "PPU-~{CE}",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "5"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "~{ROMSEL}": {
+      "name": "~{ROMSEL}",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "9"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "Net-(U7A-E)": {
+      "name": "Net-(U7A-E)",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "1"
+        },
+        {
+          "ref": "U7",
+          "pin": "11"
+        }
+      ],
+      "external": false,
+      "const": null,
+      "named": true
+    },
+    "~{OE1}": {
+      "name": "~{OE1}",
+      "nodes": [
+        {
+          "ref": "U9",
+          "pin": "1"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "~{OE2}": {
+      "name": "~{OE2}",
+      "nodes": [
+        {
+          "ref": "U8",
+          "pin": "1"
+        },
+        {
+          "ref": "U9",
+          "pin": "15"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "4016-D0": {
+      "name": "4016-D0",
+      "nodes": [
+        {
+          "ref": "U9",
+          "pin": "2"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "4016-D3": {
+      "name": "4016-D3",
+      "nodes": [
+        {
+          "ref": "U9",
+          "pin": "4"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "4016-D4": {
+      "name": "4016-D4",
+      "nodes": [
+        {
+          "ref": "U9",
+          "pin": "6"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "4017-D0": {
+      "name": "4017-D0",
+      "nodes": [
+        {
+          "ref": "U8",
+          "pin": "2"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "4017-D3": {
+      "name": "4017-D3",
+      "nodes": [
+        {
+          "ref": "U8",
+          "pin": "4"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "4017-D4": {
+      "name": "4017-D4",
+      "nodes": [
+        {
+          "ref": "U8",
+          "pin": "6"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "CPU-D0": {
+      "name": "CPU-D0",
+      "nodes": [
+        {
+          "ref": "U8",
+          "pin": "3"
+        },
+        {
+          "ref": "U9",
+          "pin": "3"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "CPU-D1": {
+      "name": "CPU-D1",
+      "nodes": [
+        {
+          "ref": "U9",
+          "pin": "13"
+        },
+        {
+          "ref": "U9",
+          "pin": "9"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "CPU-D2": {
+      "name": "CPU-D2",
+      "nodes": [
+        {
+          "ref": "U9",
+          "pin": "11"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "CPU-D3": {
+      "name": "CPU-D3",
+      "nodes": [
+        {
+          "ref": "U8",
+          "pin": "5"
+        },
+        {
+          "ref": "U9",
+          "pin": "5"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "CPU-D4": {
+      "name": "CPU-D4",
+      "nodes": [
+        {
+          "ref": "U8",
+          "pin": "7"
+        },
+        {
+          "ref": "U9",
+          "pin": "7"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "PPU-A13": {
+      "name": "PPU-A13",
+      "nodes": [
+        {
+          "ref": "U8",
+          "pin": "12"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "PPU-~{A13}": {
+      "name": "PPU-~{A13}",
+      "nodes": [
+        {
+          "ref": "U8",
+          "pin": "11"
+        }
+      ],
+      "external": true,
+      "const": null,
+      "named": true
+    },
+    "GND": {
+      "name": "GND",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "15"
+        },
+        {
+          "ref": "U7",
+          "pin": "8"
+        },
+        {
+          "ref": "U8",
+          "pin": "10"
+        },
+        {
+          "ref": "U8",
+          "pin": "14"
+        },
+        {
+          "ref": "U8",
+          "pin": "15"
+        },
+        {
+          "ref": "U8",
+          "pin": "8"
+        },
+        {
+          "ref": "U9",
+          "pin": "8"
+        }
+      ],
+      "external": false,
+      "const": 0,
+      "named": true
+    },
+    "VCC": {
+      "name": "VCC",
+      "nodes": [
+        {
+          "ref": "U7",
+          "pin": "16"
+        },
+        {
+          "ref": "U8",
+          "pin": "16"
+        },
+        {
+          "ref": "U9",
+          "pin": "10"
+        },
+        {
+          "ref": "U9",
+          "pin": "12"
+        },
+        {
+          "ref": "U9",
+          "pin": "14"
+        },
+        {
+          "ref": "U9",
+          "pin": "16"
+        }
+      ],
+      "external": false,
+      "const": 1,
+      "named": true
+    }
+  },
+  "device": "ATF1502AS",
+  "package": "PLCC44",
+  "pin_locks": {},
+  "keep_jtag": true,
+  "layout": {},
+  "format": "cpldglue-project-1"
+}

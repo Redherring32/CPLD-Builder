@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=CPLD-Builder
+Comment=Merge 74-series glue logic into an ATF15xx CPLD
+Exec=@OPT@/CPLD-Builder %f
+Icon=cpld-builder
+Terminal=false
+Categories=Development;Electronics;
