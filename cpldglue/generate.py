@@ -518,6 +518,12 @@ def generate(design: Design, assign: bool = True) -> Result:
                        f"check (needs Yosys) and enter it in Renesas Go Configure "
                        f"from the LUT sheet; {dev.note}.")
         dev = None                 # no macrocell estimate for GreenPAKs
+    is_gal = bool(dev and dev.kind == "gal")
+    if is_gal:
+        r.notes.append(f"{dev.name} is a GAL: the Build button fits the design into its "
+                       f"{dev.macrocells} output macrocells (OLMCs) and writes the .jed "
+                       f"(needs Yosys); the GAL panel shows the real fit and pins. Every "
+                       f"output and every flip-flop or latch takes an OLMC.")
     outs = sum(1 for p in r.ports if p.direction != "input")
     regs = sum(u.storage for ref, k in design.parts.items()
                for i, u in enumerate(UNITS[k]) if i not in r.unused.get(ref, []))
@@ -541,8 +547,9 @@ def generate(design: Design, assign: bool = True) -> Result:
         bigger = [n for n, d in devices.DEVICES.items()
                   if d.macrocells >= need and d.vcc == dev.vcc
                   and n == d.family + dev.name[7:]]
+        cells = "output macrocells (OLMCs)" if is_gal else "macrocells"
         r.warnings.append(
-            f"may not fit: about {need} macrocells needed ({outs} outputs + "
+            f"may not fit: about {need} {cells} needed ({outs} outputs + "
             f"{regs} flip-flops/latches - {r.macrocells_shared} at their own pin), "
             f"{dev.name} has {dev.macrocells}"
             + (f"; try {bigger[0]}" if bigger else "") + ". The fitter has the final word.")

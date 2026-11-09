@@ -67,7 +67,9 @@ pre-built into `cpldglue/gui/static/` and served from 127.0.0.1.
 
 - **Chips view.** Each chip shows the gates inside it: gate symbols wired
   to their pins for simple logic and buffers, labelled blocks for
-  flip-flops, decoders, counters and shift registers. Gates the design
+  flip-flops, decoders, counters and shift registers. Single-gate parts
+  (74x1G...) are drawn as just their logic symbol, with bubbles for
+  inverted outputs and active-low enables. Gates the design
   doesn't use are faded; they are left out of the CPLD. Drag parts in
   from the library, then drag from pin to pin
   to wire them. Click a net label to rename it, mark it as going off-chip
@@ -236,6 +238,51 @@ whether it fits. There is no open tool chain that programs GreenPAKs, so
 enter in Renesas Go Configure. `cpldglue greenpak project.cg -o out` does the
 same from the command line.
 
+## GAL16V8 / GAL22V10
+
+Small glue (a decoder, a few gates and buffers, a counter) also fits a
+GAL16V8 (DIP20 / PLCC20) or GAL22V10 (DIP24 / PLCC28), or the pin-compatible
+Microchip ATF16V8B / ATF22V10C. cpldglue fits the design and writes the
+`.jed` itself; only Yosys is needed, no vendor tools.
+
+- **GAL panel** (report panel): one tile per output macrocell (OLMC) with
+  its product terms used of the ones it has, the GAL16V8 mode, and a check that
+  the fuse map behaves like the design. **Use the fitted pins** locks the pins
+  the GAL needs (clock on pin 1, /OE on pin 11, big outputs on the 22V10's
+  larger OLMCs). **Equations…** shows them as a galette/GALasm `.pld`.
+- **Build** (or `cpldglue build project.cg -o out`) writes `NAME.jed` (for any
+  GAL programmer: TL866, T48, ...), `NAME.pld` and `NAME.pin`.
+
+How it works: every output, register input and output enable becomes a
+minimal sum of products of the input pins and the register/latch outputs, in
+whichever polarity needs fewer terms (an output's value doesn't matter while
+its enable is off, which often saves terms). The fitter picks the GAL16V8 mode
+(simple, complex or registered), places the outputs and inputs, and the fuse
+map is read back and simulated against the design, with clock pulses.
+The JEDEC writer follows galette's fuse layout and is tested bit for bit
+against galette's own test files.
+
+What fits, and what doesn't:
+
+| | GAL16V8 | GAL22V10 |
+|---|---|---|
+| Output macrocells | 8 (7-8 product terms each) | 10 (8, 10, 12, 14, 16, 16, 14, 12, 10, 8) |
+| Inputs | 10 dedicated (8 in registered mode) + spare OLMC pins | 12 dedicated + spare OLMC pins |
+| Clock | one, pin 1, rising edge | one, pin 1, rising edge |
+| Async reset | none | one product term that resets every register |
+| Output enable | one product term per output; registered outputs share pin 11 | one product term per output |
+
+- Every output and every flip-flop takes an OLMC; a register that isn't an
+  output still uses one (and its pin, which you leave unconnected).
+- Latches ('373, '573) are built from feedback: Q = LE·D + /LE·Q + D·Q, with
+  the last term keeping Q glitch-free while LE falls.
+- Gets an error, with the reason: two clocks ('595: SRCLK and RCLK), a
+  falling-edge or gated clock, async set/reset on a 16V8, registers with
+  different async resets on a 22V10 (it resets all of them together), async
+  parallel loads ('165), an output enable that needs more than one product term.
+- A '374 is a classic 16R8: eight registers with OE on pin 11. A '161 counter
+  with its async clear fits a 22V10 (the clear becomes AR).
+
 ## Devices
 
 The whole ATF15xx family, in every package Microchip lists:
@@ -248,6 +295,9 @@ The whole ATF15xx family, in every package Microchip lists:
 | ATF1504ASV / ASVL | 64 | same as AS | 3.3 V |
 | ATF1508AS / ASL | 128 | PLCC84, TQFP100, PQFP100, PQFP160 | 5 V |
 | ATF1508ASV / ASVL | 128 | same as AS | 3.3 V |
+
+Also the GAL16V8 (DIP20, PLCC20) and GAL22V10 (DIP24, PLCC28), see above,
+and the GreenPAK SLG46826 / SLG46620.
 
 `python -m cpldglue devices` lists the I/O count of each. The pin tables
 (I/O, JTAG, the four dedicated inputs, VCC/GND and no-connects) are
@@ -295,8 +345,23 @@ variant AxROM: U4A           # variants: see "Variants" above
 ## Supported parts
 
 74x00 02 04 05 06 07 08 10 11 14 20 32 74 86 125 126 138 139 153 157 161
-163 164 165 174 175 240 244 245 273 367 368 373 374 377 540 541 573 574 595,
-and CD4021. Any logic family prefix works (LS, HC, HCT, ALS, F...).
+163 164 165 166 174 175 194 240 244 245 273 367 368 373 374 377 540 541 573
+574 594 595 597, and CD4014, CD4015, CD4021, CD4094 (also 74HC4094 / HEF4094).
+Any logic family prefix works (LS, HC, HCT, ALS, F...).
+
+Single gates (SOT-23-5 / SOT-23-6, pinouts from the TI SN74LVC1G datasheets):
+74x1G00 02 08 32 86 (2-input), 1G10 11 27 (3-input), 1G04 14 34 17
+(inverters / buffers, '14 and '17 Schmitt), 1G06 07 (open drain), 1G125 126
+240 (3-state), 1G79 80 (D flip-flop). Names like SN74LVC1G00DBVR,
+74AHC1GU04, 74HC1G125 and onsemi's NC7SZ00 / NC7S04 are recognised.
+
+Shift registers:
+
+| Type | Parts |
+|---|---|
+| Serial in, parallel out (SIPO) | '164, '594, '595, CD4015 (dual 4-bit), CD4094 / '4094 |
+| Parallel in, serial out (PISO) | '165, '166 (sync load), '597 (input register), CD4014 (sync load), CD4021 |
+| Universal (left / right / load) | '194 |
 
 Parts that can't be put in a CPLD at all: one-shots ('121, '123), anything
 that relies on external RC timing, analog parts. The tool warns about
@@ -342,6 +407,12 @@ cd cpldglue/gui/frontend && npm test
   build button's error paths.
 - Editor model (TypeScript): every editing operation, undo/redo, and
   rebuilding the TinyTendo example using only editor operations.
+- GAL target (`tests/test_gal.py`): the JEDEC writer against galette's own
+  `.pld` → `.jed` test files bit for bit (`tests/reference/galette`, MIT); the
+  fuse-map simulator against the equations; the minimal covers; real fits
+  (decoder, '244, '161 with async clear, '374, '245, '573) checked by
+  simulation; a wrong fuse is caught; the written `.pld` assembles to the
+  same fuses; the CLI and Build button.
 
 ## Things to keep in mind
 

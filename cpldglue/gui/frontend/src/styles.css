@@ -440,3 +440,30 @@ table.keys td:first-child { white-space: nowrap; color: var(--accent); }
 .modal .variant-mode label { align-self: flex-start; text-align: left; }
 .variant-grid th input { width: 9em; }
 .variant-grid td.center { text-align: center; }
+
+/* GAL panel: one tile per output macrocell */
+.gal-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 4px; margin: 4px 0; }
+.gal-cell { display: grid; grid-template-columns: auto 1fr; gap: 1px 6px; align-items: center;
+  padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; font-size: 12px; min-width: 0; }
+.gal-cell.unused { opacity: 0.55; }
+.gal-cell .gal-pin { font-variant-numeric: tabular-nums; color: var(--muted); }
+.gal-cell .gal-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gal-cell .gp-track { grid-column: 1 / -1; height: 5px; }
+.gal-cell .gal-kind { grid-column: 1 / -1; }
+.gal-moved { margin: 2px 0; }
+.gal-pld { max-height: min(65vh, 600px); overflow: auto; }
+
+/* Single gates drawn as their logic symbol: no chip body, just the symbol */
+.chip.symbol { background: transparent; box-shadow: none; color: var(--text); }
+.chip.symbol .chip-header { top: 4px; }
+.chip.symbol .chip-key { color: var(--muted); }
+.chip.symbol.chip-selected { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 6px; }
+.symbol-art .wire { stroke: var(--muted); }
+.symbol-art .sym path, .symbol-art .sym circle, .symbol-art .sym rect {
+  fill: var(--panel); stroke: var(--text); stroke-width: 1.6; }
+.symbol-art .sym path.open { fill: none; }
+.symbol-art .sym path.glyph { stroke-width: 1.1; }
+.symbol-art .sym text { fill: var(--text); font-size: 10px; font-weight: 600; }
+.symbol-art .sym text.overbar { text-decoration: overline; }
+.symbol-art .unused { opacity: .35; }
+.chip.symbol .pinnum { background: transparent; }

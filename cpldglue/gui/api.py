@@ -289,6 +289,9 @@ class Builder:
             return {"ok": False, "log": "Fix the report errors first:\n" + "\n".join(r.errors)}
         top = generate.sanitize(design.name) + suffix
         outdir.mkdir(parents=True, exist_ok=True)
+        dev = devices.DEVICES.get(design.device.upper())
+        if dev is not None and dev.kind == "gal":
+            return self._build_gal(design, r, outdir, top)
         verilog = r.verilog.replace(f"module {generate.sanitize(design.name)} (",
                                     f"module {top} (", 1)
         (outdir / f"{top}.v").write_text(verilog, encoding="utf-8")
@@ -305,6 +308,20 @@ class Builder:
             log.append(str(e))
             ok = False
         return {"ok": ok, "log": "\n".join(log), "outdir": str(outdir)}
+
+
+    def _build_gal(self, design: Design, r, outdir: Path, top: str) -> dict:
+        from .. import gal
+        try:
+            b = gal.build(design, r, outdir / "gal-work")
+        except (RuntimeError, ValueError) as e:
+            return {"ok": False, "log": str(e)}
+        log = gal.report_lines(b, design.device)
+        if b.fit.ok:
+            files = gal.write_files(b, design, outdir, top)
+            (outdir / f"{top}.v").write_text(r.verilog, encoding="utf-8")
+            log.append("Wrote " + ", ".join(f.name for f in files) + f" and {top}.v in {outdir}")
+        return {"ok": b.ok, "log": "\n".join(log), "outdir": str(outdir)}
 
 
 class SimSession:

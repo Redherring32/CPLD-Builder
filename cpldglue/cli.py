@@ -204,7 +204,9 @@ def main(argv=None) -> int:
             return 0
         if a.cmd == "devices":
             for dev in devices.DEVICES.values():
-                if dev.kind == "greenpak":
+                if dev.kind == "gal":
+                    print(f"{dev.name:<12} GAL, {dev.macrocells} output macrocells, {dev.supply}")
+                elif dev.kind == "greenpak":
                     cells = ", ".join(f"{n} {t}" for t, n in dev.resources.items())
                     print(f"{dev.name:<12} GreenPAK ({cells}), {dev.supply}")
                 else:
@@ -238,6 +240,18 @@ def main(argv=None) -> int:
             print(res["log"])
             return 0 if res["ok"] else 1
         rc = _emit(d, a)
+        dev = devices.DEVICES.get(d.device.upper())
+        if a.cmd == "build" and rc == 0 and dev is not None and dev.kind == "gal":
+            from . import gal
+            top = generate.sanitize(d.name)
+            b = gal.build(d, generate.generate(d), a.out / "gal-work")
+            for line in gal.report_lines(b, d.device):
+                print(line)
+            if not b.fit.ok:
+                return 1
+            files = gal.write_files(b, d, a.out, top)
+            print("Wrote " + ", ".join(f.name for f in files) + f" in {a.out}")
+            return 0 if b.ok else 1
         if a.cmd == "build" and rc == 0:
             from . import deps
             flow = a.flow_dir or deps.flow_dir()

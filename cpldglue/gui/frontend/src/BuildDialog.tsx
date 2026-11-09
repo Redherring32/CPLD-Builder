@@ -3,9 +3,9 @@ import * as api from "./api";
 import type { BuildConfig } from "./api";
 import type { Design } from "./types";
 
-export function BuildDialog({ design, config, onClose, onSetup, greenpak = false }: {
+export function BuildDialog({ design, config, onClose, onSetup, greenpak = false, gal = false }: {
   design: Design; config: BuildConfig; onClose: () => void; onSetup: () => void;
-  greenpak?: boolean;
+  greenpak?: boolean; gal?: boolean;
 }) {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; log: string } | null>(null);
@@ -36,22 +36,32 @@ export function BuildDialog({ design, config, onClose, onSetup, greenpak = false
             Renesas Go Configure, which programs the chip. The Verilog and pin file tabs show
             the same design.</p>
         ) : <>
+        {gal ? (
+          <ul className="small build-cfg">
+            <li>cpldglue fits the design into the {design.device} and writes the fuse map
+              (<span className="mono">.jed</span>) for any GAL programmer (TL866 / T48 /
+              XGecu), plus the equations (<span className="mono">.pld</span>, galette / GALasm
+              format) and the pins. Only Yosys is needed.</li>
+            <li className="muted">Output goes to a <span className="mono">build/</span> folder next to the project file.</li>
+          </ul>
+        ) : (
         <ul className="small build-cfg">
           <li>Yosys flow: <span className="mono">{config.flow_dir ?? "not downloaded"}</span>
             {config.flow_dir && !config.flow_ok && <b className="err"> (cells.lib / techmap.v missing)</b>}</li>
           <li>Fitter: <span className="mono">{config.fitter ?? "not found — the build stops at the EDIF netlist"}</span></li>
           <li className="muted">Output goes to a <span className="mono">build/</span> folder next to the project file.</li>
         </ul>
+        )}
         {result && !greenpak && (
           <pre className={`code buildlog ${result.ok ? "ok" : "bad"}`} data-testid="buildlog">{result.log}</pre>
         )}
         </>}
         <div className="modal-foot">
-          {!greenpak && (!config.flow_dir || !config.fitter) &&
+          {!greenpak && !gal && (!config.flow_dir || !config.fitter) &&
             <button onClick={onSetup} disabled={running}>Get missing tools…</button>}
           <span className="spacer" />
           <button onClick={onClose} disabled={running}>Close</button>
-          {!greenpak && <button className="primary" onClick={go} disabled={running || !config.flow_dir}>
+          {!greenpak && <button className="primary" onClick={go} disabled={running || (!gal && !config.flow_dir)}>
             {running ? "Building…" : result ? "Build again" : "Build"}
           </button>}
         </div>

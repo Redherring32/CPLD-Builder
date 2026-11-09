@@ -8,15 +8,55 @@ export const CHIP_W = 220;
 export const GUTTER = 150;
 export const NODE_W = CHIP_W + 2 * GUTTER;
 
-export function chipHeight(part: Part): number {
-  return HEADER_H + (part.pins.length / 2) * ROW_H + 12;
+// ---- single-gate parts, drawn as a logic symbol (GateSymbol.tsx) ----
+export const SYM_W = 132;               // symbol body width (inside the chip column)
+export const SYM_HEADER = 34;           // reference + part number above the symbol
+
+/** Parts drawn as symbols: one gate or flip-flop, or two gates, in a small
+ *  (up to 8-pin) package. */
+export function isSymbolPart(part: Part): boolean {
+  const us = part.units ?? [];
+  if (!(us.length === 1 || (us.length === 2 && us.every((u) => u.symbol !== "block"))))
+    return false;
+  const named = new Set(us.flatMap((u) => [...u.inputs, ...u.outputs, ...u.controls]));
+  return part.pins.length <= 8 &&
+    part.pins.every((p) => ["gnd", "vcc", "nc"].includes(p.kind) || named.has(p.name));
 }
 
-/** DIP pin placement: pins 1..n/2 down the left, n..n/2+1 down the right. */
+export interface SymPin { side: "left" | "right"; y: number }   // y = row centre
+
+/** Where each signal pin sits, and the symbol's height. Enables go above
+ *  the inputs (they enter the buffer from the top); the output faces the
+ *  middle of the inputs. */
+export function symbolLayout(part: Part): { pins: Record<string, SymPin>; height: number } {
+  const byName: Record<string, string> = {};
+  for (const p of part.pins) byName[p.name] = p.number;
+  const pins: Record<string, SymPin> = {};
+  let top = SYM_HEADER;
+  part.units.forEach((u, i) => {                   // a dual part stacks its gates
+    if (i > 0) top += 10;
+    const block = u.symbol === "block";
+    const left = block ? [...u.inputs, ...u.controls] : [...u.controls, ...u.inputs];
+    left.forEach((n, k) => { pins[byName[n]] = { side: "left", y: top + k * ROW_H + ROW_H / 2 }; });
+    const ins = block ? left : u.inputs;
+    const first = left.indexOf(ins[0]);
+    const mid = top + ((first + left.length - 1) / 2) * ROW_H + ROW_H / 2;
+    for (const o of u.outputs) pins[byName[o]] = { side: "right", y: mid };
+    top += Math.max(left.length, 1) * ROW_H;
+  });
+  return { pins, height: top + 10 };
+}
+
+export function chipHeight(part: Part): number {
+  if (isSymbolPart(part)) return symbolLayout(part).height;
+  return HEADER_H + Math.ceil(part.pins.length / 2) * ROW_H + 12;
+}
+
+/** DIP/SOT pin placement: pins 1..ceil(n/2) down the left, the rest back up the right. */
 export function pinSide(part: Part, number: string): { side: "left" | "right"; row: number } {
   const n = part.pins.length;
   const k = parseInt(number, 10);
-  const half = n / 2;
+  const half = Math.ceil(n / 2);           // SOT-23-5: 1-3 left, 5-4 right
   return k <= half ? { side: "left", row: k - 1 } : { side: "right", row: n - k };
 }
 

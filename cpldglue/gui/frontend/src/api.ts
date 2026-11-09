@@ -166,6 +166,19 @@ export function greenpak(design: Design) {
   return post<GreenPakResult>("api/greenpak", { design });
 }
 
+export interface GalCell {
+  pin: number; name: string; kind: "reg" | "comb" | "input" | "unused";
+  terms: number; capacity: number; oe: boolean; active_high: boolean; what: string;
+}
+export interface GalResult {
+  ok: boolean; error?: string; fits: boolean; errors: string[]; notes: string[];
+  mode: string; mode_title: string; cells: GalCell[]; pins: Record<string, number>;
+  check: string; check_ok: boolean; pld: string;
+}
+export function galFit(design: Design) {
+  return post<GalResult>("api/gal", { design });
+}
+
 export interface KicadSymbol { name: string; clipboard: string; library: string; warnings: string[]; labels: number }
 export function kicadSymbol(design: Design) {
   return post<KicadSymbol>("api/kicad/symbol", { design });

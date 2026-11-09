@@ -31,6 +31,8 @@ def make_handler(project: api.Project, builder: "api.Builder | None" = None):
     import tempfile
     from .. import greenpak
     gp = greenpak.Session(Path(tempfile.mkdtemp(prefix="cpldglue_gp_")))
+    from .. import gal
+    galfit = gal.Session(Path(tempfile.mkdtemp(prefix="cpldglue_gal_")))
     jobs = deps.Jobs()
     kicad = api.KiCadImporter()
     builder = builder or api.Builder(None, None)
@@ -159,6 +161,12 @@ def make_handler(project: api.Project, builder: "api.Builder | None" = None):
                 try:
                     design = design_of(self._body())
                     return self._json(gp.payload(design, generate.generate(design)))
+                except Exception as e:                       # report, don't crash
+                    return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+            if path == "/api/gal":
+                try:
+                    design = design_of(self._body())
+                    return self._json(galfit.payload(design, generate.generate(design)))
                 except Exception as e:                       # report, don't crash
                     return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
             if path == "/api/generate":

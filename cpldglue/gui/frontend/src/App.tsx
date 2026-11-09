@@ -446,6 +446,7 @@ function Editor() {
             const info = devices.find((x) => x.device === d);
             return <option key={d} value={d}>
               {!info ? d : info.kind === "greenpak" ? `${d} · GreenPAK`
+                : info.kind === "gal" ? `${d} · GAL · ${info.macrocells} OLMC`
                 : `${d} · ${info.macrocells} MC${info.vcc !== undefined && info.vcc < 5 ? " · 3.3 V" : ""}`}
             </option>;
           })}
@@ -592,7 +593,8 @@ function Editor() {
         )}
         <ReportPanel design={design} device={deviceInfo} gen={gen} genError={genError} slots={slots}
                      selectedNet={selectedNet} onSelectNet={setSelectedNet}
-                     onSimNets={setSimNets} />
+                     onSimNets={setSimNets}
+                     onSetLocks={(l) => apply((d) => m.setLocks(d, l))} />
       </main>
 
       {help && (
@@ -630,7 +632,8 @@ function Editor() {
       {dialog === "build" && buildCfg && (
         <BuildDialog design={design} config={buildCfg} onClose={() => setDialog(null)}
                      onSetup={() => setDialog("setup")}
-                     greenpak={deviceInfo?.kind === "greenpak"} />
+                     greenpak={deviceInfo?.kind === "greenpak"}
+                     gal={deviceInfo?.kind === "gal"} />
       )}
       {menu && mi && (
         <ContextMenu x={menu.x} y={menu.y} title={mi.title} items={mi.items}

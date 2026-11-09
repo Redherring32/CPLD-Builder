@@ -4,7 +4,8 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { GateArt, artInfo } from "./GateArt";
-import { CHIP_W, chipHeight } from "./layout";
+import { CHIP_W, SYM_W, chipHeight, isSymbolPart, symbolLayout } from "./layout";
+import { SymbolArt } from "./GateSymbol";
 import type { Part } from "./types";
 import partsJson from "./fixtures/parts.json";
 
@@ -46,12 +47,12 @@ function wiresOf(part: Part): Seg[] {
 
 describe("gate drawings", () => {
   it("covers every part", () => {
-    expect(parts.length).toBe(41);
+    expect(parts.length).toBe(109);
     for (const p of parts) expect(p.units.length).toBeGreaterThan(0);
   });
 
   for (const part of parts) {
-    if (artInfo(part).style !== "gates") continue;
+    if (artInfo(part).style !== "gates" || isSymbolPart(part)) continue;   // symbols: below
     it(`${part.key}: wires don't cross and stay inside the chip`, () => {
       const segs = wiresOf(part);
       const pins = new Set(segs.map((s) => s.pin));
@@ -68,6 +69,48 @@ describe("gate drawings", () => {
           if (segs[i].pin !== segs[j].pin && touches(segs[i], segs[j]))
             bad.push(`pin ${segs[i].pin} ↔ pin ${segs[j].pin}`);
       expect(bad).toEqual([]);
+    });
+  }
+
+  const symbols = parts.filter(isSymbolPart);
+  it("draws the single gates as symbols", () => {
+    expect(symbols.map((p) => p.key).sort()).toEqual(
+      parts.filter((p) => /^74x[12]G/.test(p.key)).map((p) => p.key).sort());
+    expect(symbols.length).toBe(32);
+    expect(isSymbolPart(parts.find((p) => p.key === "74x00")!)).toBe(false);
+  });
+
+  for (const part of symbols) {
+    it(`${part.key}: symbol wires reach every pin, don't cross, stay inside`, () => {
+      const html = renderToStaticMarkup(
+        <SymbolArt part={part} unused={[]} wireClass={(n) => `p${n}`} />);
+      const segs: Seg[] = [];
+      for (const m of html.matchAll(/<path d="([^"]+)" class="wire p(\d+)/g))
+        segs.push(...segments(m[1], m[2]));
+      const lay = symbolLayout(part);
+      const signal = part.pins.filter((p) => !["gnd", "vcc", "nc"].includes(p.kind)).map((p) => p.number);
+      expect([...new Set(segs.map((s) => s.pin))].sort()).toEqual(signal.sort());
+      expect(Object.keys(lay.pins).sort()).toEqual(signal.sort());
+      expect(chipHeight(part)).toBe(lay.height);
+      for (const s of segs) {
+        for (const v of [s.x1, s.x2]) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThanOrEqual(SYM_W); }
+        for (const v of [s.y1, s.y2]) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThanOrEqual(lay.height); }
+      }
+      // each pin's wire starts at its own row, on its side
+      for (const n of signal) {
+        const p = lay.pins[n];
+        const first = segs.find((s) => s.pin === n)!;
+        const edge = p.side === "left" ? 22 : SYM_W - 22;
+        expect([first.x1, first.x2]).toContain(edge);
+        expect([first.y1, first.y2]).toContain(p.y);
+      }
+      const bad: string[] = [];
+      for (let i = 0; i < segs.length; i++)
+        for (let j = i + 1; j < segs.length; j++)
+          if (segs[i].pin !== segs[j].pin && touches(segs[i], segs[j]))
+            bad.push(`pin ${segs[i].pin} ↔ pin ${segs[j].pin}`);
+      expect(bad).toEqual([]);
+      if (/[12]G(00|02|04|06|10|14|27|240)$/.test(part.key)) expect(html).toContain("<circle");
     });
   }
 

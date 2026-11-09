@@ -51,7 +51,7 @@ export function artInfo(part: Part): ArtInfo {
 }
 
 // ---- gate shapes, drawn pointing down (+y) around (0, 0) ------------------
-function shape(sym: string, w: number, l: number): ReactNode {
+export function gateShape(sym: string, w: number, l: number): ReactNode {
   const h = w / 2, t = -l / 2, b = l / 2;
   const curve = l * 0.3;
   switch (sym) {
@@ -75,7 +75,7 @@ function shape(sym: string, w: number, l: number): ReactNode {
 }
 
 /** y of the gate's input edge at offset x (OR-type gates have a curved back). */
-function inputEdge(sym: string, x: number, w: number, l: number): number {
+export function gateInputEdge(sym: string, x: number, w: number, l: number): number {
   const t = -l / 2;
   if (sym !== "or" && sym !== "nor" && sym !== "xor") return t;
   const s = (x + w / 2) / w;                          // 0..1 across the gate
@@ -90,7 +90,7 @@ export function GateArt({ refName, part, unused, wireClass }: {
 }) {
   const info = artInfo(part);
   const pos = pinPositions(part);
-  const height = HEADER_H + (part.pins.length / 2) * ROW_H + 12;
+  const height = HEADER_H + Math.ceil(part.pins.length / 2) * ROW_H + 12;
   const dead = new Set(unused);
   const items: ReactNode[] = [];
 
@@ -171,7 +171,7 @@ export function GateArt({ refName, part, unused, wireClass }: {
         const ordered = [...L, ...R];
         ordered.forEach((p, k) => {
           const x = cx - w / 2 + (w * (k + 0.5)) / ordered.length;
-          const local = inputEdge(u.symbol, x - cx, w, l);
+          const local = gateInputEdge(u.symbol, x - cx, w, l);
           const ey = down ? cy + local : cy - local;
           wires.push({ d: `M${edgeX(p.side)},${p.y} H${x} V${ey}`, pin: p.num, ref_: refName });
         });
@@ -190,7 +190,7 @@ export function GateArt({ refName, part, unused, wireClass }: {
                        pin: p.num, ref_: refName });
         });
         parts.unshift(<g key="s" transform={`translate(${cx} ${cy})${down ? "" : " rotate(180)"}`}>
-          {shape(u.symbol, w, l)}</g>);
+          {gateShape(u.symbol, w, l)}</g>);
       } else {
         // Horizontal: input on one side, output on the other.
         const right = out.side === "right";
@@ -206,7 +206,7 @@ export function GateArt({ refName, part, unused, wireClass }: {
         if (inv) parts.push(<circle key="ob" cx={tip + dir * BUBBLE} cy={cy} r={BUBBLE} />);
         wires.push({ d: `M${ox},${cy} H${jout} V${out.y} H${edgeX(out.side)}`, pin: out.num, ref_: refName });
         parts.unshift(<g key="s" transform={`translate(${cx} ${cy}) rotate(${right ? -90 : 90})`}>
-          {shape(u.symbol, w, l)}</g>);
+          {gateShape(u.symbol, w, l)}</g>);
       }
       items.push(
         <g key={`u${i}`} className={`gate${dead.has(i) ? " unused" : ""}`}>

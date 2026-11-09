@@ -52,7 +52,7 @@ class Device:
     packages: Dict[str, Package]
     vcc: float = 5.0
     fitter_tech: str = ""       # -tech name the Microchip fitter accepts
-    kind: str = "cpld"          # "cpld" (ATF15xx) or "greenpak"
+    kind: str = "cpld"          # "cpld" (ATF15xx), "greenpak" or "gal"
     # GreenPAK logic cells: slot type -> count. A slot type names what a cell
     # can be: "lut3_dff" is a 3-bit LUT or a DFF/latch.
     resources: Dict[str, int] = field(default_factory=dict)
@@ -61,7 +61,7 @@ class Device:
 
     @property
     def family(self) -> str:    # ATF1502 / ATF1504 / ATF1508, or the GreenPAK part
-        return self.name if self.kind == "greenpak" else self.name[:7]
+        return self.name if self.kind in ("greenpak", "gal") else self.name[:7]
 
 
 # Packages per family, from the Microchip datasheets / BSDL set.
@@ -159,6 +159,63 @@ DEVICES["SLG46620"] = Device(
     # generator), 12 dedicated DFF/latches, 2 inverters.
     resources={"lut2": 8, "lut3": 16, "lut4": 2, "dff": 12, "inv": 2},
     note="one-time programmable (emulate on the dev board first)")
+
+
+# ---- GAL16V8 / GAL22V10 ------------------------------------------------------------
+# Pin roles from the Lattice datasheets. The fitter (gal.py) works in DIP pin
+# numbers; the PLCC packages map onto them (PLCC20 numbers match the DIP;
+# PLCC28 adds a no-connect pin at 1, 8, 15 and 22).
+def _gal_package(name: str, dip_pins: int, olmc: List[int], roles: Dict[int, str],
+                 plcc28: bool = False, footprint: str = "") -> Package:
+    to_pkg = (lambda d: d + 1 + (d - 1) // 6) if plcc28 else (lambda d: d)
+    gnd, vcc = dip_pins // 2, dip_pins
+    io = [to_pkg(p) for p in olmc]
+    inputs = {f"I{to_pkg(p)}": to_pkg(p) for p in range(1, dip_pins)
+              if p not in olmc and p != gnd}
+    names = {to_pkg(p): roles.get(p, "I/O" if p in olmc else "I")
+             for p in range(1, dip_pins + 1)}
+    names[to_pkg(gnd)], names[to_pkg(vcc)] = "GND", "VCC"
+    nc = [1, 8, 15, 22] if plcc28 else []
+    total = 28 if plcc28 else dip_pins
+    dip = name.startswith("DIP")
+    return Package(name, io, inputs, {}, {to_pkg(gnd): "GND", to_pkg(vcc): "VCC"}, total, nc,
+                   pin_names=names, style="" if dip else "plcc",
+                   sides=(total // 2, 0, total // 2, 0) if dip else None, footprint=footprint)
+
+
+def gal_dip_pin(package: str, pin: int) -> int:
+    """Package pin -> DIP pin (what the GAL fitter uses)."""
+    if package.upper() == "PLCC28":
+        return pin - 1 - (pin - 1) // 7
+    return pin
+
+
+def gal_package_pin(package: str, dip: int) -> int:
+    if package.upper() == "PLCC28":
+        return dip + 1 + (dip - 1) // 6
+    return dip
+
+
+_G16 = list(range(12, 20))
+_G16_ROLES = {1: "I/CLK", 11: "I/OE"}
+_G22 = list(range(14, 24))
+_G22_ROLES = {1: "I/CLK"}
+DEVICES["GAL16V8"] = Device(
+    "GAL16V8", 8, {
+        "DIP20": _gal_package("DIP20", 20, _G16, _G16_ROLES,
+                              footprint="Package_DIP:DIP-20_W7.62mm"),
+        "PLCC20": _gal_package("PLCC20", 20, _G16, _G16_ROLES,
+                               footprint="Package_LCC:PLCC-20"),
+    }, 5.0, kind="gal", supply="5 V",
+    note="8 output macrocells (8 product terms each); also ATF16V8B")
+DEVICES["GAL22V10"] = Device(
+    "GAL22V10", 10, {
+        "DIP24": _gal_package("DIP24", 24, _G22, _G22_ROLES,
+                              footprint="Package_DIP:DIP-24_W7.62mm"),
+        "PLCC28": _gal_package("PLCC28", 24, _G22, _G22_ROLES, plcc28=True,
+                               footprint="Package_LCC:PLCC-28"),
+    }, 5.0, kind="gal", supply="5 V",
+    note="10 output macrocells (8-16 product terms); also ATF22V10C")
 
 
 def get_package(device: str, package: str) -> Tuple[Device, Package]:

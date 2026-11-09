@@ -79,7 +79,7 @@ export interface DeviceInfo {
   pin_count: number;
   nc?: number[];
   vcc?: number;
-  kind?: "cpld" | "greenpak";
+  kind?: "cpld" | "greenpak" | "gal";
   resources?: Record<string, number>;
   supply?: string;
   note?: string;

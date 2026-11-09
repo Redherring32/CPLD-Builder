@@ -1,5 +1,6 @@
 import { MacrocellBar } from "./MacrocellBar";
 import { GreenPakPanel } from "./GreenPakPanel";
+import { GalPanel } from "./GalPanel";
 import { useState } from "react";
 import type { Design, DeviceInfo, GenResult } from "./types";
 import { shortNetName } from "./netContext";
@@ -10,11 +11,13 @@ const TAB_NAMES: Record<Tab, string> = {
   report: "Report", verilog: "Verilog", pins: "Pin file", sim: "Simulate",
 };
 
-export function ReportPanel({ design, device, gen, genError, slots, selectedNet, onSelectNet, onSimNets }: {
+export function ReportPanel({ design, device, gen, genError, slots, selectedNet, onSelectNet, onSimNets,
+                             onSetLocks }: {
   design: Design; device: DeviceInfo | undefined; gen: GenResult | null; genError: string;
   slots: Record<string, number>;
   selectedNet: string | null; onSelectNet: (n: string | null) => void;
   onSimNets: (nets: Record<string, number | null> | null) => void;
+  onSetLocks?: (locks: Record<string, number>) => void;
 }) {
   const [tab, setTab] = useState<Tab>("report");
   const used = gen?.ports.length ?? 0;
@@ -40,7 +43,9 @@ export function ReportPanel({ design, device, gen, genError, slots, selectedNet,
 
       {device?.kind === "greenpak"
         ? <GreenPakPanel design={design} device={device} gen={gen} />
-        : <MacrocellBar design={design} gen={gen} slots={slots} />}
+        : device?.kind === "gal"
+          ? <GalPanel design={design} device={device} gen={gen} onSetLocks={onSetLocks} />
+          : <MacrocellBar design={design} gen={gen} slots={slots} />}
       <div className="report-body">
         {genError && <div className="msg error">{genError}</div>}
         {!gen && !genError && <div className="muted">Generating…</div>}

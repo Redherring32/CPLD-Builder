@@ -4,6 +4,8 @@ import type { Part, PartPin } from "./types";
 import { CHIP_W, GUTTER, HEADER_H, NODE_W, ROW_H, chipHeight, pinSide } from "./layout";
 import { NetContext, type PinNet } from "./netContext";
 import { GateArt, artInfo } from "./GateArt";
+import { SymbolArt } from "./GateSymbol";
+import { SYM_W, isSymbolPart, symbolLayout } from "./layout";
 import { slotColor } from "./MacrocellBar";
 
 export type ChipData = { ref: string; part: Part };
@@ -39,11 +41,14 @@ function NetLabel({ info, side, onSelect, selected, value }: {
   );
 }
 
-function PinRow({ refName, pin, part, hideName }: {
+function PinRow({ refName, pin, part, hideName, place }: {
   refName: string; pin: PartPin; part: Part; hideName: boolean;
+  place?: { side: "left" | "right"; top: number };     // symbol view
 }) {
   const { pinNet, issues, selectedNet, select, onPinMenu, netValues } = useContext(NetContext);
-  const { side, row } = pinSide(part, pin.number);
+  const ps = place ? null : pinSide(part, pin.number);
+  const side = place ? place.side : ps!.side;
+  const top = place ? place.top : HEADER_H + ps!.row * ROW_H;
   const key = `${refName}.${pin.number}`;
   const info = pinNet[key];
   const issue = issues[key];
@@ -52,7 +57,7 @@ function PinRow({ refName, pin, part, hideName }: {
   return (
     <div
       className={`pinrow ${side}${selected ? " selected" : ""}${issue ? ` issue-${issue}` : ""}`}
-      style={{ top: HEADER_H + row * ROW_H, height: ROW_H }}
+      style={{ top, height: ROW_H }}
       title={`${refName} pin ${pin.number}: ${pin.name} (${KIND_LABEL[pin.kind]})` +
              (power ? "" : " — drag to another pin to connect, right-click for options")}
       onContextMenu={(e) => { if (!power) onPinMenu(e, refName, pin.number); }}
@@ -86,6 +91,30 @@ function ChipNodeImpl({ data, selected }: NodeProps<ChipNodeType>) {
     const v = netValues ? netValues[net.name] : undefined;
     return [net.name === selectedNet ? "sel" : "", v === 1 ? "hi" : v === 0 ? "lo" : ""].join(" ");
   };
+  if (isSymbolPart(part)) {
+    const lay = symbolLayout(part);
+    const deadList = unused[ref] ?? [];
+    const dead = deadList.length === part.units.length;
+    return (
+      <div className="chip-wrap" style={{ width: NODE_W, paddingLeft: GUTTER + (CHIP_W - SYM_W) / 2 }}>
+        <div className={`chip symbol${selected ? " chip-selected" : ""}${vt?.inactive ? " chip-inactive" : ""}`}
+             style={{ width: SYM_W, height: lay.height }}
+             title={`${ref}: ${part.key} - ${part.title}${dead ? " (unused, left out)" : ""}`}>
+          <div className="chip-header" onContextMenu={(e) => onChipMenu(e, ref)}
+               title="Drag to move · right-click to rename or delete · Delete key removes">
+            <span className="chip-ref">{ref}</span>
+            <span className="chip-key">{part.key}</span>
+          </div>
+          {part.warning && <div className="chip-warn" title={part.warning}>!</div>}
+          {vt && <div className="chip-variant">{vt.inactive ? "not in this variant · " : ""}{vt.label}</div>}
+          <SymbolArt part={part} unused={deadList} wireClass={wireClass} />
+          {part.pins.filter((p) => lay.pins[p.number]).map((p) => (
+            <PinRow key={p.number} refName={ref} pin={p} part={part} hideName
+                    place={{ side: lay.pins[p.number].side, top: lay.pins[p.number].y - ROW_H / 2 }} />))}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="chip-wrap" style={{ width: NODE_W, paddingLeft: GUTTER }}>
       <div className={`chip${selected ? " chip-selected" : ""}${vt?.inactive ? " chip-inactive" : ""}`}
