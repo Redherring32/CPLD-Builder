@@ -78,6 +78,9 @@ def _emit(d: dsg.Design, a) -> int:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] in (["_nextpnr-ice40"], ["_icepack"]):   # internal: downloaded iCE40 tools
+        from . import deps
+        return deps.run_ice40_tool(argv[0][1:], argv[1:])
     if argv[:1] == ["_yosys"]:                # internal: run the downloaded Yosys
         from . import deps
         return deps.run_yosys(argv[1:])
@@ -130,7 +133,7 @@ def main(argv=None) -> int:
     _common(gp)
 
     st = sub.add_parser("setup", help="show optional tools, or download them")
-    st.add_argument("what", nargs="*", metavar="{yosys,flow,fitter}",
+    st.add_argument("what", nargs="*", metavar="{yosys,flow,fitter,nextpnr}",
                     help="what to download (nothing = just show status)")
 
     a = ap.parse_args(argv)
@@ -138,7 +141,8 @@ def main(argv=None) -> int:
         from . import deps
         bad = [w for w in a.what if w not in deps.FETCHERS]
         if bad:                       # (argparse choices + nargs="*" breaks on 3.9)
-            ap.error(f"setup: unknown {', '.join(bad)}; choose from yosys, flow, fitter")
+            ap.error(f"setup: unknown {', '.join(bad)}; choose from yosys, flow, fitter, "
+                     f"nextpnr")
         for name in a.what:
             def progress(done, total, msg, _last=[0]):
                 pct = f"{100 * done // total}%" if total else f"{done // 1024} KB"
@@ -204,7 +208,9 @@ def main(argv=None) -> int:
             return 0
         if a.cmd == "devices":
             for dev in devices.DEVICES.values():
-                if dev.kind == "gal":
+                if dev.kind == "ice40":
+                    print(f"{dev.name:<12} iCE40 FPGA, {dev.resources.get('lut')} LUTs, {dev.supply}")
+                elif dev.kind == "gal":
                     print(f"{dev.name:<12} GAL, {dev.macrocells} output macrocells, {dev.supply}")
                 elif dev.kind == "greenpak":
                     cells = ", ".join(f"{n} {t}" for t, n in dev.resources.items())
@@ -241,6 +247,11 @@ def main(argv=None) -> int:
             return 0 if res["ok"] else 1
         rc = _emit(d, a)
         dev = devices.DEVICES.get(d.device.upper())
+        if a.cmd == "build" and rc == 0 and dev is not None and dev.kind in ("ice40", "max7000"):
+            from .gui import api
+            res = api.Builder(None, None).build(d, a.out)
+            print(res["log"])
+            return 0 if res["ok"] else 1
         if a.cmd == "build" and rc == 0 and dev is not None and dev.kind == "gal":
             from . import gal
             top = generate.sanitize(d.name)

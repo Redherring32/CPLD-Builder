@@ -27,7 +27,7 @@ from . import deps
 
 CLI_COMMANDS = {"parts", "devices", "kicad", "gen", "build", "gui", "setup", "kicad-symbol",
                 "greenpak",
-                "_yosys"}
+                "_yosys", "_nextpnr-ice40", "_icepack"}
 
 
 def resource_dir() -> Path:

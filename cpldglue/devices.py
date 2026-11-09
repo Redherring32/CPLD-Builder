@@ -52,7 +52,7 @@ class Device:
     packages: Dict[str, Package]
     vcc: float = 5.0
     fitter_tech: str = ""       # -tech name the Microchip fitter accepts
-    kind: str = "cpld"          # "cpld" (ATF15xx), "greenpak" or "gal"
+    kind: str = "cpld"          # "cpld" (ATF15xx), "max7000", "greenpak", "gal" or "ice40"
     # GreenPAK logic cells: slot type -> count. A slot type names what a cell
     # can be: "lut3_dff" is a 3-bit LUT or a DFF/latch.
     resources: Dict[str, int] = field(default_factory=dict)
@@ -61,7 +61,7 @@ class Device:
 
     @property
     def family(self) -> str:    # ATF1502 / ATF1504 / ATF1508, or the GreenPAK part
-        return self.name if self.kind in ("greenpak", "gal") else self.name[:7]
+        return self.name if self.kind in ("greenpak", "gal", "ice40", "max7000") else self.name[:7]
 
 
 # Packages per family, from the Microchip datasheets / BSDL set.
@@ -239,6 +239,53 @@ DEVICES["GAL22V10"] = Device(
                                footprint="Package_LCC:PLCC-28"),
     }, 5.0, kind="gal", supply="5 V",
     note="10 output macrocells (8-16 product terms); also ATF22V10C")
+
+
+# ---- Altera/Intel MAX 7000S ------------------------------------------------------------
+# Pin-compatible with the ATF1502AS/1504AS/1508AS (checked against the pin-out
+# diagrams in Altera's MAX 7000 data sheet), so they use the same tables.
+for _name, _mc, _fam, _pkgs in (("EPM7032S", 32, "ATF1502", ["PLCC44", "TQFP44"]),
+                                ("EPM7064S", 64, "ATF1504", ["PLCC44", "TQFP44", "PLCC84"]),
+                                ("EPM7128S", 128, "ATF1508", ["PLCC84"])):
+    DEVICES[_name] = Device(_name, _mc, {p: _package(_fam, p) for p in _pkgs}, 5.0,
+                            kind="max7000", supply="5 V",
+                            note=f"pin-compatible with the {_fam}AS; builds with Quartus II 13.0 SP1")
+
+
+# ---- Lattice iCE40 (pins from KiCad's FPGA_Lattice library, checked against
+# Project IceStorm's I/O list; see ice40pins.py) ---------------------------------------
+def _ice40_package(key: str, name: str, sides, footprint: str) -> Package:
+    from .ice40pins import ICE40_PINS
+    t = ICE40_PINS[key]
+    names = {n: v.replace("~{", "").replace("}", "") for n, v in t["names"].items()}
+    io = list(t["io"])
+    power = {n: ("GND" if v.startswith("GND") else "VCC") for n, v in names.items()
+             if n not in io and v.startswith(("GND", "VCC", "VPP", "SPI_VCC"))}
+    nc = [n for n, v in names.items() if v == "NC" and n not in io]
+    reserved = {v: n for n, v in names.items()
+                if n not in io and n not in power and n not in nc}
+    out_only = [n for n in io if names[n].startswith("RGB")]    # UP5K LED drivers
+    return Package(name, io, {}, {}, power, len(names), nc, out_only=out_only,
+                   reserved=reserved, pin_names=names, style="qfn", sides=sides,
+                   footprint=footprint)
+
+
+_TQ144 = "Package_QFP:LQFP-144_20x20mm_P0.5mm"
+DEVICES["ICE40HX1K"] = Device(
+    "iCE40HX1K", 0, {"TQ144": _ice40_package("iCE40HX1K-TQ144", "TQ144", (36, 36, 36, 36), _TQ144)},
+    3.3, kind="ice40", resources={"lut": 1280}, supply="1.2 V core, 3.3 V I/O",
+    note="FPGA: 1280 LUTs; I/O is 3.3 V, not 5 V tolerant; loads from SPI flash")
+DEVICES["ICE40HX4K"] = Device(
+    "iCE40HX4K", 0, {"TQ144": _ice40_package("iCE40HX4K-TQ144", "TQ144", (36, 36, 36, 36), _TQ144)},
+    3.3, kind="ice40", resources={"lut": 3520}, supply="1.2 V core, 3.3 V I/O",
+    note="FPGA: 3520 LUTs; I/O is 3.3 V, not 5 V tolerant; loads from SPI flash")
+DEVICES["ICE40UP5K"] = Device(
+    "iCE40UP5K", 0, {"SG48": _ice40_package(
+        "iCE40UP5K-SG48", "SG48", (12, 12, 12, 12),
+        "Package_DFN_QFN:QFN-48-1EP_7x7mm_P0.5mm_EP5.6x5.6mm")},
+    3.3, kind="ice40", resources={"lut": 5280}, supply="1.2 V core, 3.3 V I/O",
+    note="FPGA: 5280 LUTs; I/O is 3.3 V, not 5 V tolerant; RGB pins 39-41 are LED "
+         "drivers (outputs only)")
 
 
 def get_package(device: str, package: str) -> Tuple[Device, Package]:

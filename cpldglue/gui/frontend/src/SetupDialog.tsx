@@ -65,8 +65,9 @@ export function SetupDialog({ onClose }: { onClose: () => void }) {
                   <b>{d.title}</b>
                   <span className="muted small"> · for {d.needed_for}</span>
                   <span className="spacer" />
-                  {d.id === "kicad" && !d.found && d.url && (
-                    <a href={d.url} target="_blank" rel="noreferrer">Get KiCad</a>
+                  {!d.found && d.url && (
+                    <a href={d.url} target="_blank" rel="noreferrer">
+                      {d.id === "kicad" ? "Get KiCad" : "Get it"}</a>
                   )}
                   {d.can_fetch && (
                     <button onClick={() => start(d.id)} disabled={busy}

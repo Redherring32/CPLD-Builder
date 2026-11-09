@@ -3,10 +3,12 @@ import * as api from "./api";
 import type { BuildConfig } from "./api";
 import type { Design } from "./types";
 
-export function BuildDialog({ design, config, onClose, onSetup, greenpak = false, gal = false }: {
+export function BuildDialog({ design, config, onClose, onSetup, greenpak = false, gal = false,
+                             kind = "" }: {
   design: Design; config: BuildConfig; onClose: () => void; onSetup: () => void;
-  greenpak?: boolean; gal?: boolean;
+  greenpak?: boolean; gal?: boolean; kind?: string;
 }) {
+  const ice40 = kind === "ice40", max = kind === "max7000";
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; log: string } | null>(null);
 
@@ -36,7 +38,23 @@ export function BuildDialog({ design, config, onClose, onSetup, greenpak = false
             Renesas Go Configure, which programs the chip. The Verilog and pin file tabs show
             the same design.</p>
         ) : <>
-        {gal ? (
+        {ice40 ? (
+          <ul className="small build-cfg">
+            <li>Yosys synthesises the design, nextpnr places and routes it, icepack makes
+              the bitstream (<span className="mono">.bin</span>, for the SPI flash or
+              iceprog). The synthesised netlist is simulated against the design.</li>
+            <li>nextpnr: <span className="mono">{config.nextpnr ?? "not found — get it from Setup"}</span></li>
+            <li className="muted">Output goes to a <span className="mono">build/</span> folder next to the project file.</li>
+          </ul>
+        ) : max ? (
+          <ul className="small build-cfg">
+            <li>Writes a Quartus project (<span className="mono">.qpf/.qsf</span> with the device
+              and every pin) and, with Quartus II 13.0 SP1 installed, compiles it to a
+              <span className="mono"> .pof</span> (and <span className="mono">.svf</span>).</li>
+            <li>Quartus: <span className="mono">{config.quartus ?? "not found — the build stops at the project files"}</span></li>
+            <li className="muted">Output goes to a <span className="mono">build/</span> folder next to the project file.</li>
+          </ul>
+        ) : gal ? (
           <ul className="small build-cfg">
             <li>cpldglue fits the design into the {design.device} and writes the fuse map
               (<span className="mono">.jed</span>) for any GAL programmer (TL866 / T48 /
@@ -57,11 +75,13 @@ export function BuildDialog({ design, config, onClose, onSetup, greenpak = false
         )}
         </>}
         <div className="modal-foot">
-          {!greenpak && !gal && (!config.flow_dir || !config.fitter) &&
+          {!greenpak && !gal && (ice40 ? !config.nextpnr : max ? !config.quartus
+                                     : (!config.flow_dir || !config.fitter)) &&
             <button onClick={onSetup} disabled={running}>Get missing tools…</button>}
           <span className="spacer" />
           <button onClick={onClose} disabled={running}>Close</button>
-          {!greenpak && <button className="primary" onClick={go} disabled={running || (!gal && !config.flow_dir)}>
+          {!greenpak && <button className="primary" onClick={go}
+                                disabled={running || (!gal && !ice40 && !max && !config.flow_dir)}>
             {running ? "Building…" : result ? "Build again" : "Build"}
           </button>}
         </div>

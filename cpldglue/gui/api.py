@@ -264,8 +264,11 @@ class Builder:
             fitter = str(f) if f else None
         flow_ok = bool(self.flow_dir and (self.flow_dir / "cells.lib").exists()
                        and (self.flow_dir / "techmap.v").exists())
+        from .. import ice40, max7000
+        q = max7000.find_quartus()
         return {"flow_dir": str(self.flow_dir) if self.flow_dir else None,
                 "flow_ok": flow_ok, "fitter": fitter,
+                "nextpnr": ice40.tools_found(), "quartus": str(q) if q else None,
                 "enabled": True}       # always shown; the dialog says what's missing
 
     def build(self, design: Design, outdir: Path) -> dict:
@@ -292,6 +295,20 @@ class Builder:
         dev = devices.DEVICES.get(design.device.upper())
         if dev is not None and dev.kind == "gal":
             return self._build_gal(design, r, outdir, top)
+        if dev is not None and dev.kind == "ice40":
+            from .. import ice40
+            try:
+                res = ice40.build(design, r, outdir, top)
+            except (RuntimeError, ValueError) as e:
+                return {"ok": False, "log": str(e), "outdir": str(outdir)}
+            return {**res, "outdir": str(outdir)}
+        if dev is not None and dev.kind == "max7000":
+            from .. import max7000
+            try:
+                res = max7000.build(design, r, outdir, top)
+            except (RuntimeError, ValueError) as e:
+                return {"ok": False, "log": str(e), "outdir": str(outdir)}
+            return {**res, "outdir": str(outdir)}
         verilog = r.verilog.replace(f"module {generate.sanitize(design.name)} (",
                                     f"module {top} (", 1)
         (outdir / f"{top}.v").write_text(verilog, encoding="utf-8")

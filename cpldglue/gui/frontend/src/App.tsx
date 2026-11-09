@@ -447,6 +447,8 @@ function Editor() {
             return <option key={d} value={d}>
               {!info ? d : info.kind === "greenpak" ? `${d} · GreenPAK`
                 : info.kind === "gal" ? `${d} · GAL · ${info.macrocells} OLMC`
+                : info.kind === "ice40" ? `${d} · FPGA · ${info.resources?.lut ?? "?"} LUT · 3.3 V`
+                : info.kind === "max7000" ? `${d} · ${info.macrocells} MC · MAX 7000S`
                 : `${d} · ${info.macrocells} MC${info.vcc !== undefined && info.vcc < 5 ? " · 3.3 V" : ""}`}
             </option>;
           })}
@@ -633,7 +635,7 @@ function Editor() {
         <BuildDialog design={design} config={buildCfg} onClose={() => setDialog(null)}
                      onSetup={() => setDialog("setup")}
                      greenpak={deviceInfo?.kind === "greenpak"}
-                     gal={deviceInfo?.kind === "gal"} />
+                     gal={deviceInfo?.kind === "gal"} kind={deviceInfo?.kind ?? ""} />
       )}
       {menu && mi && (
         <ContextMenu x={menu.x} y={menu.y} title={mi.title} items={mi.items}

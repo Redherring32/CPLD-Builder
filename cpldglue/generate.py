@@ -518,6 +518,16 @@ def generate(design: Design, assign: bool = True) -> Result:
                        f"check (needs Yosys) and enter it in Renesas Go Configure "
                        f"from the LUT sheet; {dev.note}.")
         dev = None                 # no macrocell estimate for GreenPAKs
+    is_ice40 = bool(dev and dev.kind == "ice40")
+    if is_ice40:
+        r.notes.append(f"{dev.name} is an FPGA: Build synthesises it with Yosys and places "
+                       f"it with nextpnr ({dev.resources.get('lut')} LUTs; glue logic uses a "
+                       f"tiny fraction). Its I/O is 3.3 V and not 5 V tolerant: use level "
+                       f"shifters on a 5 V board.")
+        dev = None                 # no macrocell estimate for FPGAs
+    if dev and dev.kind == "max7000":
+        r.notes.append(f"{dev.name}: {dev.note}. The macrocell estimate works as for the "
+                       f"ATF15xx; Quartus has the final word.")
     is_gal = bool(dev and dev.kind == "gal")
     if is_gal:
         r.notes.append(f"{dev.name} is a GAL: the Build button fits the design into its "
@@ -553,7 +563,7 @@ def generate(design: Design, assign: bool = True) -> Result:
             f"{regs} flip-flops/latches - {r.macrocells_shared} at their own pin), "
             f"{dev.name} has {dev.macrocells}"
             + (f"; try {bigger[0]}" if bigger else "") + ". The fitter has the final word.")
-    if is_gp:                      # macrocells don't apply; see greenpak.py
+    if is_gp or is_ice40:          # macrocells don't apply
         r.macrocells, r.macrocell_parts, r.macrocells_shared = None, {}, 0
     if dev and dev.vcc < 5:
         r.notes.append(f"{dev.name} runs from 3.3 V. Check the datasheet for 5 V "

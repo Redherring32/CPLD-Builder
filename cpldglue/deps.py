@@ -2,6 +2,8 @@
 
 Everything goes in a per-user folder (data_dir()), never next to the app:
 
+  nextpnr/        nextpnr-ice40 + icepack as WebAssembly (yowasp-nextpnr-ice40,
+                  pinned, SHA-256 checked; runs on Yosys's runtime)
   yosys/          Yosys as WebAssembly (the yowasp-yosys wheel and the small
                   runtime it needs), pinned versions, SHA-256 checked
   atf15xx_yosys/  cells.lib + techmap.v from hoglet67/atf15xx_yosys, pinned
@@ -64,6 +66,12 @@ YOSYS_WHEELS = [
              "abd01743f24e5287cd7a5db3752faf1a2d65353f38ec26d98e25a6db65958c85", 18654,
              "platformdirs-4.4.0-py3-none-any.whl"),
 ]
+NEXTPNR_WHEEL = Download(
+    f"{_PY}/9c/5a/d026fbe2cfc362d353815671654cd93a35d732492ad71b0ab9d471811694/"
+    "yowasp_nextpnr_ice40-0.11.1.0.post826-py3-none-any.whl",
+    "d220c8d6d936f3e6c91ed119d6ae58a638d0cd331e61be3e48b47fd743bd5607", 71785832,
+    "yowasp_nextpnr_ice40-0.11.1.0.post826-py3-none-any.whl")
+QUARTUS_URL = "https://www.intel.com/content/www/us/en/software-kit/711791/intel-quartus-ii-web-edition-design-software-version-13-0sp1-for-windows.html"
 WASMTIME = {
     "win32-amd64": Download(
         f"{_PY}/90/e4/8603bd4a360edbe5178efe4e7b48f1677749a96a3caa3fc68ab23b0de62c/"
@@ -109,6 +117,24 @@ def platform_key() -> str:
 # ---- locations ---------------------------------------------------------------
 def yosys_dir() -> Path:
     return data_dir() / "yosys"
+
+
+def nextpnr_dir() -> Path:
+    return data_dir() / "nextpnr"
+
+
+def nextpnr_installed() -> bool:
+    return (nextpnr_dir() / "yowasp_nextpnr_ice40" / "__init__.py").exists() and \
+        yosys_installed()
+
+
+def run_ice40_tool(tool: str, argv: List[str]) -> int:
+    """Run the downloaded nextpnr-ice40 or icepack in this process."""
+    sys.path.insert(0, str(yosys_dir()))           # yowasp runtime + wasmtime
+    sys.path.insert(0, str(nextpnr_dir()))
+    import yowasp_nextpnr_ice40 as y                 # noqa: E402
+    run = {"nextpnr-ice40": y.run_nextpnr_ice40, "icepack": y.run_icepack}[tool]
+    return run(argv)
 
 
 def flow_dir() -> Optional[Path]:
@@ -231,6 +257,33 @@ def fetch_yosys(progress: Progress) -> str:
             "minute or so; after that it starts in a second or two.")
 
 
+def fetch_nextpnr(progress: Progress) -> str:
+    msg = ""
+    if not yosys_installed():                       # it runs on Yosys's WebAssembly runtime
+        try:
+            from .yosys import find_yosys
+            native = find_yosys()[-1] != "_yosys"
+        except RuntimeError:
+            native = False
+        if not native or not _have_module("yowasp_runtime"):
+            msg = fetch_yosys(progress) + " "
+    f = download(NEXTPNR_WHEEL, data_dir() / "downloads", progress, "nextpnr-ice40")
+    tmp = data_dir() / "nextpnr.new"
+    shutil.rmtree(tmp, ignore_errors=True)
+    progress(NEXTPNR_WHEEL.size, NEXTPNR_WHEEL.size, f"Unpacking {f.name}")
+    with zipfile.ZipFile(f) as z:
+        z.extractall(tmp)
+    shutil.rmtree(nextpnr_dir(), ignore_errors=True)
+    tmp.replace(nextpnr_dir())
+    f.unlink(missing_ok=True)
+    return msg + "nextpnr-ice40 and icepack installed (iCE40 builds)."
+
+
+def _have_module(name: str) -> bool:
+    import importlib.util
+    return importlib.util.find_spec(name) is not None
+
+
 def fetch_flow(progress: Progress) -> str:
     progress(0, None, "Downloading atf15xx_yosys")
     req = urllib.request.Request(FLOW_ZIP, headers={"User-Agent": "cpldglue"})
@@ -284,7 +337,8 @@ def open_installer(setup: Path) -> None:
         subprocess.Popen(["wine", str(setup)], cwd=str(setup.parent))
 
 
-FETCHERS = {"yosys": fetch_yosys, "flow": fetch_flow, "fitter": fetch_fitter}
+FETCHERS = {"yosys": fetch_yosys, "flow": fetch_flow, "fitter": fetch_fitter,
+            "nextpnr": fetch_nextpnr}
 
 
 # ---- status ------------------------------------------------------------------
@@ -317,6 +371,18 @@ def status() -> List[dict]:
                             + ("" if sys.platform == "win32" else "; needs Wine"),
                 "can_fetch": sys.platform == "win32" or bool(shutil.which("wine")),
                 "installer": str(prochip_setup()) if prochip_setup() else None})
+    from . import ice40, max7000
+    nx = ice40.tools_found()
+    out.append({"id": "nextpnr", "title": "nextpnr-ice40 + icepack", "found": bool(nx),
+                "where": (f"{nextpnr_dir()} (downloaded)" if nx and nx.endswith("_nextpnr-ice40")
+                          else nx), "needed_for": "Build for iCE40 FPGAs (.bin)",
+                "download": "about 72 MB from PyPI (yowasp-nextpnr-ice40, runs as WebAssembly)",
+                "can_fetch": platform_key() in WASMTIME})
+    q = max7000.find_quartus()
+    out.append({"id": "quartus", "title": "Quartus II 13.0 SP1 (MAX 7000S)", "found": bool(q),
+                "where": str(q) if q else None, "needed_for": "Build for MAX 7000S (.pof)",
+                "download": "install Intel Quartus II 13.0 SP1 Web Edition (free; the last "
+                            "version for MAX 7000S)", "can_fetch": False, "url": QUARTUS_URL})
     k = find_kicad_cli()
     out.append({"id": "kicad", "title": "KiCad (kicad-cli)", "found": bool(k), "where": k,
                 "needed_for": "Import KiCad…", "download": f"install from {KICAD_URL}",

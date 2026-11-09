@@ -1,7 +1,7 @@
 # cpldglue
 
 Merge 74-series and CD4000-series glue logic into one Microchip ATF15xx
-CPLD. You pick the chips; cpldglue reads how they are wired (from a
+CPLD (or a MAX 7000S CPLD, a GAL, a GreenPAK or a small iCE40 FPGA). You pick the chips; cpldglue reads how they are wired (from a
 KiCad schematic or a small text netlist) and generates:
 
 - one self-contained Verilog file (top level plus the chip models it uses),
@@ -238,12 +238,12 @@ whether it fits. There is no open tool chain that programs GreenPAKs, so
 enter in Renesas Go Configure. `cpldglue greenpak project.cg -o out` does the
 same from the command line.
 
-## GAL16V8 / GAL22V10
+## GAL16V8 / GAL20V8 / GAL20RA10 / GAL22V10
 
 Small glue (a decoder, a few gates and buffers, a counter) also fits a
-GAL16V8 (DIP20 / PLCC20) or GAL22V10 (DIP24 / PLCC28), or the pin-compatible
-Microchip ATF16V8B / ATF22V10C. cpldglue fits the design and writes the
-`.jed` itself; only Yosys is needed, no vendor tools.
+GAL16V8 (DIP20 / PLCC20), GAL20V8, GAL20RA10 or GAL22V10 (DIP24 / PLCC28), or
+the pin-compatible Microchip ATF16V8B / ATF20V8B / ATF22V10C. cpldglue fits the
+design and writes the `.jed` itself; only Yosys is needed, no vendor tools.
 
 - **GAL panel** (report panel): one tile per output macrocell (OLMC) with
   its product terms used of the ones it has, the GAL16V8 mode, and a check that
@@ -264,13 +264,19 @@ against galette's own test files.
 
 What fits, and what doesn't:
 
-| | GAL16V8 | GAL22V10 |
-|---|---|---|
-| Output macrocells | 8 (7-8 product terms each) | 10 (8, 10, 12, 14, 16, 16, 14, 12, 10, 8) |
-| Inputs | 10 dedicated (8 in registered mode) + spare OLMC pins | 12 dedicated + spare OLMC pins |
-| Clock | one, pin 1, rising edge | one, pin 1, rising edge |
-| Async reset | none | one product term that resets every register |
-| Output enable | one product term per output; registered outputs share pin 11 | one product term per output |
+| | GAL16V8 / GAL20V8 | GAL22V10 | GAL20RA10 |
+|---|---|---|---|
+| Output macrocells | 8 (7-8 product terms each) | 10 (8, 10, 12, 14, 16, 16, 14, 12, 10, 8) | 10 (4 product terms each) |
+| Inputs | 10 / 14 dedicated (2 fewer in registered mode) + spare OLMC pins | 12 dedicated + spare OLMC pins | 10 dedicated + spare OLMC pins |
+| Clock | one, pin 1, rising edge | one, pin 1, rising edge | a product term per register: any input, either edge |
+| Async reset | none | one product term that resets every register | reset and preset terms per register |
+| Output enable | one product term per output; registered outputs share /OE (pin 11 / 13) | one product term per output | one product term per output, plus /OE on pin 13 |
+
+The GAL20RA10 lifts the one-clock limit: a falling-edge JK ('112), flip-flops
+on different clocks, or a '165's asynchronous parallel load fit (each register
+gets its own clock, reset and preset term). It has only 4 product terms per
+output, its registers feed back from the pins, and pin 1 (/PL) must be tied
+high and pin 13 (/OE) low.
 
 - Every output and every flip-flop takes an OLMC; a register that isn't an
   output still uses one (and its pin, which you leave unconnected).
@@ -282,6 +288,37 @@ What fits, and what doesn't:
   parallel loads ('165), an output enable that needs more than one product term.
 - A '374 is a classic 16R8: eight registers with OE on pin 11. A '161 counter
   with its async clear fits a 22V10 (the clear becomes AR).
+
+The JEDEC writer is tested bit for bit against galette's test files for all
+four parts (`tests/reference/galette`).
+
+## iCE40 FPGAs (open tool chain)
+
+The Lattice iCE40HX1K and iCE40HX4K (TQ144) and iCE40UP5K (SG48) are
+supported with the open tools: Yosys (`synth_ice40`), nextpnr-ice40 and
+icepack. **Build** writes `NAME.pcf` (the editor's pins) and `NAME.bin` (the
+bitstream for the configuration flash or iceprog), and reports the logic
+cells used and the maximum clock frequency. nextpnr and icepack come as
+WebAssembly from Setup (`cpldglue setup nextpnr`, about 72 MB) unless a native
+`nextpnr-ice40` / `icepack` is on the PATH.
+
+The synthesised netlist is simulated against the design (with Yosys's iCE40
+cell models); placement and routing are nextpnr's and aren't simulated.
+iCE40 I/O is **3.3 V and not 5 V tolerant**: a 5 V board needs level shifters.
+Pin tables come from KiCad's FPGA_Lattice library and are checked against
+Project IceStorm's I/O list; the UP5K's RGB pins (39-41) are LED drivers, so
+only outputs go there.
+
+## MAX 7000S (Quartus)
+
+The Altera/Intel EPM7032S, EPM7064S and EPM7128S (PLCC44, TQFP44, PLCC84)
+are pin-compatible with the ATF1502/1504/1508 (checked against the pin-out
+diagrams in Altera's MAX 7000 data sheet) and use the same pin tables.
+**Build** writes a Quartus project (`NAME.qpf/.qsf` with the device and every
+pin) and, if Quartus II 13.0 SP1 (the last version that supports MAX 7000S)
+is installed, compiles it to `NAME.pof` for a USB-Blaster and `NAME.svf` for
+other JTAG programmers. Without Quartus you can open the project files in it
+later.
 
 ## Devices
 
@@ -296,8 +333,9 @@ The whole ATF15xx family, in every package Microchip lists:
 | ATF1508AS / ASL | 128 | PLCC84, TQFP100, PQFP100, PQFP160 | 5 V |
 | ATF1508ASV / ASVL | 128 | same as AS | 3.3 V |
 
-Also the GAL16V8 (DIP20, PLCC20) and GAL22V10 (DIP24, PLCC28), see above,
-and the GreenPAK SLG46826 / SLG46620.
+Also, see above: the MAX 7000S EPM7032S / EPM7064S / EPM7128S, the GAL16V8
+(DIP20, PLCC20), GAL20V8, GAL20RA10 and GAL22V10 (DIP24, PLCC28), the iCE40HX1K /
+HX4K (TQ144) and iCE40UP5K (SG48) FPGAs, and the GreenPAK SLG46826 / SLG46620.
 
 `python -m cpldglue devices` lists the I/O count of each. The pin tables
 (I/O, JTAG, the four dedicated inputs, VCC/GND and no-connects) are
@@ -344,16 +382,25 @@ variant AxROM: U4A           # variants: see "Variants" above
 
 ## Supported parts
 
-74x00 02 04 05 06 07 08 10 11 14 20 32 74 86 125 126 138 139 153 157 161
-163 164 165 166 174 175 194 240 244 245 273 367 368 373 374 377 540 541 573
-574 594 595 597, and CD4014, CD4015, CD4021, CD4094 (also 74HC4094 / HEF4094).
-Any logic family prefix works (LS, HC, HCT, ALS, F...).
+74x00 02 03 04 05 06 07 08 09 10 11 14 20 21 27 30 32 74 86 109 112 125 126
+138 139 151 153 154 157 161 163 164 165 166 173 174 175 191 193 194 240 244
+245 257 258 259 273 367 368 373 374 377 393 521 540 541 573 574 594 595 597
+688, and CD4001 4011 4013 4014 4015 4017 4021 4040 4049 4050 4069 4070 4071
+4081 4094 (also 74HC40xx / HEF / MC14xxx names). Any logic family prefix works
+(LS, HC, HCT, ALS, F...). Every pinout was checked against a TI datasheet.
+
+Ripple counters ('393, CD4040) are modelled as synchronous counters: all
+outputs change together, where the real chip's outputs settle in turn.
+The '193's two count clocks become one clock (UP AND DOWN) plus a flip-flop
+that notes which one went low.
 
 Single gates (SOT-23-5 / SOT-23-6, pinouts from the TI SN74LVC1G datasheets):
 74x1G00 02 08 32 86 (2-input), 1G10 11 27 (3-input), 1G04 14 34 17
 (inverters / buffers, '14 and '17 Schmitt), 1G06 07 (open drain), 1G125 126
-240 (3-state), 1G79 80 (D flip-flop). Names like SN74LVC1G00DBVR,
-74AHC1GU04, 74HC1G125 and onsemi's NC7SZ00 / NC7S04 are recognised.
+240 (3-state), 1G79 80 (D flip-flop). Dual gates (TI SN74LVC2G):
+74x2G00 02 08 32 86, 2G04 14 34 17, 2G06 07, 2G125 126. Names like
+SN74LVC1G00DBVR, 74AHC1GU04, 74HC1G125 and onsemi's NC7SZ00 / NC7WZ04 are
+recognised. The editor draws single and dual gates as their logic symbols.
 
 Shift registers:
 
@@ -412,7 +459,14 @@ cd cpldglue/gui/frontend && npm test
   fuse-map simulator against the equations; the minimal covers; real fits
   (decoder, '244, '161 with async clear, '374, '245, '573) checked by
   simulation; a wrong fuse is caught; the written `.pld` assembles to the
-  same fuses; the CLI and Build button.
+  same fuses; the CLI and Build button. GAL20V8 and GAL20RA10 likewise, plus
+  20RA10 fits with separate and falling-edge clocks and an async-load '165.
+- iCE40 and MAX 7000S (`tests/test_targets.py`): every package pin exactly
+  once; the MAX 7000S tables equal the ATF ones; the Quartus project's device
+  and pin assignments; real iCE40 builds (HX1K counter, UP5K bidirectional
+  '245) whose synthesised netlists are simulated against the design, and that
+  this check catches a changed output. The iCE40 builds need nextpnr-ice40
+  (`pip install yowasp-nextpnr-ice40`), and are skipped without it.
 
 ## Things to keep in mind
 
