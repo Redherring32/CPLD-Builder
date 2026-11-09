@@ -166,12 +166,14 @@ DEVICES["SLG46620"] = Device(
 # numbers; the PLCC packages map onto them (PLCC20 numbers match the DIP;
 # PLCC28 adds a no-connect pin at 1, 8, 15 and 22).
 def _gal_package(name: str, dip_pins: int, olmc: List[int], roles: Dict[int, str],
-                 plcc28: bool = False, footprint: str = "") -> Package:
+                 plcc28: bool = False, footprint: str = "",
+                 reserved: Optional[Dict[str, int]] = None) -> Package:
     to_pkg = (lambda d: d + 1 + (d - 1) // 6) if plcc28 else (lambda d: d)
     gnd, vcc = dip_pins // 2, dip_pins
     io = [to_pkg(p) for p in olmc]
+    res = {k: to_pkg(p) for k, p in (reserved or {}).items()}
     inputs = {f"I{to_pkg(p)}": to_pkg(p) for p in range(1, dip_pins)
-              if p not in olmc and p != gnd}
+              if p not in olmc and p != gnd and to_pkg(p) not in res.values()}
     names = {to_pkg(p): roles.get(p, "I/O" if p in olmc else "I")
              for p in range(1, dip_pins + 1)}
     names[to_pkg(gnd)], names[to_pkg(vcc)] = "GND", "VCC"
@@ -179,7 +181,7 @@ def _gal_package(name: str, dip_pins: int, olmc: List[int], roles: Dict[int, str
     total = 28 if plcc28 else dip_pins
     dip = name.startswith("DIP")
     return Package(name, io, inputs, {}, {to_pkg(gnd): "GND", to_pkg(vcc): "VCC"}, total, nc,
-                   pin_names=names, style="" if dip else "plcc",
+                   reserved=res, pin_names=names, style="" if dip else "plcc",
                    sides=(total // 2, 0, total // 2, 0) if dip else None, footprint=footprint)
 
 
@@ -208,6 +210,27 @@ DEVICES["GAL16V8"] = Device(
                                footprint="Package_LCC:PLCC-20"),
     }, 5.0, kind="gal", supply="5 V",
     note="8 output macrocells (8 product terms each); also ATF16V8B")
+_G20 = list(range(15, 23))
+_G20_ROLES = {1: "I/CLK", 13: "I/OE"}
+DEVICES["GAL20V8"] = Device(
+    "GAL20V8", 8, {
+        "DIP24": _gal_package("DIP24", 24, _G20, _G20_ROLES,
+                              footprint="Package_DIP:DIP-24_W7.62mm"),
+        "PLCC28": _gal_package("PLCC28", 24, _G20, _G20_ROLES, plcc28=True,
+                               footprint="Package_LCC:PLCC-28"),
+    }, 5.0, kind="gal", supply="5 V",
+    note="8 output macrocells (8 product terms each), 14 dedicated inputs; also ATF20V8B")
+_G20RA_ROLES = {1: "/PL", 13: "/OE"}
+_G20RA_RES = {"/PL": 1, "/OE": 13}
+DEVICES["GAL20RA10"] = Device(
+    "GAL20RA10", 10, {
+        "DIP24": _gal_package("DIP24", 24, _G22, _G20RA_ROLES, reserved=_G20RA_RES,
+                              footprint="Package_DIP:DIP-24_W7.62mm"),
+        "PLCC28": _gal_package("PLCC28", 24, _G22, _G20RA_ROLES, plcc28=True,
+                               reserved=_G20RA_RES, footprint="Package_LCC:PLCC-28"),
+    }, 5.0, kind="gal", supply="5 V",
+    note="10 registers, each with its own clock, reset and preset term (4 product terms "
+         "per output)")
 DEVICES["GAL22V10"] = Device(
     "GAL22V10", 10, {
         "DIP24": _gal_package("DIP24", 24, _G22, _G22_ROLES,

@@ -1,4 +1,4 @@
-"""GAL16V8 / GAL22V10 target: fit the design into a GAL and write the .jed.
+"""GAL16V8 / GAL20V8 / GAL22V10 target: fit the design into a GAL and write the .jed.
 
 A GAL is an AND/OR array: every output macrocell (OLMC) is one sum of up to
 7-16 product terms of the input pins and the fed-back outputs. So the flow is:
@@ -9,7 +9,7 @@ A GAL is an AND/OR array: every output macrocell (OLMC) is one sum of up to
    products (ISOP), in whichever polarity needs fewer terms (each OLMC can
    invert its output for free). An output's value doesn't matter while its
    output enable is off, which often saves terms.
-3. The fitter picks the GAL16V8 mode (simple/complex/registered), places the
+3. The fitter picks the GAL16V8/20V8 mode (simple/complex/registered), places the
    outputs on OLMCs with enough product terms and the inputs on the pins left,
    honouring locked pins.
 4. cpldglue writes the JEDEC fuse map itself (the fuse layout follows galette,
@@ -19,7 +19,7 @@ A GAL is an AND/OR array: every output macrocell (OLMC) is one sum of up to
 
 GAL rules that shape what fits: one clock for all registers (pin 1, rising
 edge); the 16V8 has no asynchronous reset and its registered outputs share
-the /OE pin (11); the 22V10 has one asynchronous-reset product term that
+the /OE pin (11 on the 16V8, 13 on the 20V8); the 22V10 has one asynchronous-reset product term that
 resets every register at once. A register that isn't an output still takes a
 whole OLMC (and its pin). Latches are built from combinational feedback.
 
@@ -66,8 +66,16 @@ class Chip:
         return self.olmc_pins.index(pin) if pin in self.olmc_pins else None
 
     @property
-    def is_v8(self) -> bool:
-        return self.name == "GAL16V8"
+    def is_v8(self) -> bool:                 # GAL16V8 / GAL20V8 (simple/complex/registered)
+        return self.name in ("GAL16V8", "GAL20V8")
+
+    @property
+    def is_ra(self) -> bool:                 # GAL20RA10: per-register clock / reset / preset
+        return self.name == "GAL20RA10"
+
+    @property
+    def oe_pin(self) -> int:                 # /OE of the registered outputs (V8 parts)
+        return 13 if self.name == "GAL20V8" else 11
 
 
 _C16_SIMPLE = {1: 2, 2: 0, 3: 4, 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 28, 11: 30,
@@ -76,6 +84,16 @@ _C16_COMPLEX = {1: 2, 2: 0, 3: 4, 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 28, 11: 3
                 13: 26, 14: 22, 15: 18, 16: 14, 17: 10, 18: 6}
 _C16_REG = {2: 0, 3: 4, 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 28,
             12: 30, 13: 26, 14: 22, 15: 18, 16: 14, 17: 10, 18: 6, 19: 2}
+# GAL20V8: same idea as the 16V8, 40 columns (galette's PIN_TO_COL_20_*)
+_C20_SIMPLE = {1: 2, 2: 0, 3: 4, 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 28, 10: 32, 11: 36,
+               13: 38, 14: 34, 15: 30, 16: 26, 17: 22, 20: 18, 21: 14, 22: 10, 23: 6}
+_C20_COMPLEX = {1: 2, 2: 0, 3: 4, 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 28, 10: 32, 11: 36,
+                13: 38, 14: 34, 16: 30, 17: 26, 18: 22, 19: 18, 20: 14, 21: 10, 23: 6}
+_C20_REG = {2: 0, 3: 4, 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 28, 10: 32, 11: 36,
+            14: 38, 15: 34, 16: 30, 17: 26, 18: 22, 19: 18, 20: 14, 21: 10, 22: 6, 23: 2}
+# GAL20RA10: pin 1 is /PL (preload), pin 13 /OE; galette's PIN_TO_COL_20RA10
+_C20RA = {2: 0, 3: 4, 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 28, 10: 32, 11: 36,
+          14: 38, 15: 34, 16: 30, 17: 26, 18: 22, 19: 18, 20: 14, 21: 10, 22: 6, 23: 2}
 _C22 = {1: 0, 2: 4, 3: 8, 4: 12, 5: 16, 6: 20, 7: 24, 8: 28, 9: 32, 10: 36, 11: 40,
         13: 42, 14: 38, 15: 34, 16: 30, 17: 26, 18: 22, 19: 18, 20: 14, 21: 10, 22: 6, 23: 2}
 
@@ -83,6 +101,12 @@ CHIPS: Dict[str, Chip] = {
     "GAL16V8": Chip("GAL16V8", 20, 32, 64, 2194, tuple(range(12, 20)),
                     (56, 48, 40, 32, 24, 16, 8, 0), (8,) * 8,
                     {"simple": _C16_SIMPLE, "complex": _C16_COMPLEX, "registered": _C16_REG}),
+    "GAL20V8": Chip("GAL20V8", 24, 40, 64, 2706, tuple(range(15, 23)),
+                    (56, 48, 40, 32, 24, 16, 8, 0), (8,) * 8,
+                    {"simple": _C20_SIMPLE, "complex": _C20_COMPLEX, "registered": _C20_REG}),
+    # Rows per OLMC: OE, CLK, ARST, APRST, then 4 product terms.
+    "GAL20RA10": Chip("GAL20RA10", 24, 40, 80, 3274, tuple(range(14, 24)),
+                      (72, 64, 56, 48, 40, 32, 24, 16, 8, 0), (8,) * 10, {"": _C20RA}),
     "GAL22V10": Chip("GAL22V10", 24, 44, 132, 5892, tuple(range(14, 24)),
                      (122, 111, 98, 83, 66, 49, 34, 21, 10, 1),
                      (9, 11, 13, 15, 17, 17, 15, 13, 11, 9), {"": _C22}),
@@ -90,7 +114,7 @@ CHIPS: Dict[str, Chip] = {
 
 MODE_TITLES = {"simple": "simple mode (combinational outputs, no output enables)",
                "complex": "complex mode (combinational outputs with output enables)",
-               "registered": "registered mode (pin 1 = clock, pin 11 = /OE)",
+               "registered": "registered mode (pin 1 = clock, /OE pin = output enable)",
                "": ""}
 
 
@@ -102,11 +126,12 @@ def chip_for(device: str) -> Chip:
 
 
 def dedicated_inputs(chip: Chip, mode: str) -> List[int]:
-    if not chip.is_v8:
-        return [p for p in range(1, 14) if p != chip.gnd]
-    if mode == "registered":
-        return list(range(2, 10))
-    return list(range(1, 10)) + [11]
+    if chip.is_ra:
+        return list(range(2, 12))
+    plain = [p for p in range(1, chip.pins) if p != chip.gnd and p not in chip.olmc_pins]
+    if chip.is_v8 and mode == "registered":
+        return [p for p in plain if p not in (1, chip.oe_pin)]
+    return plain
 
 
 def olmc_input_pins(chip: Chip, mode: str) -> List[int]:
@@ -119,6 +144,8 @@ def olmc_input_pins(chip: Chip, mode: str) -> List[int]:
 def capacity(chip: Chip, mode: str, pin: int, registered: bool) -> int:
     """Product terms for the sum (the OE term is separate)."""
     i = chip.olmc(pin)
+    if chip.is_ra:
+        return 4
     if not chip.is_v8:
         return chip.row_count[i] - 1
     if mode == "simple" or registered:
@@ -135,6 +162,9 @@ class Olmc:
     terms: List[List[Lit]] = field(default_factory=list)   # the sum (pin-level semantics)
     oe: Optional[List[Lit]] = None    # one product term; None = always on
     oe_off: bool = False              # output never enabled (buried register / input)
+    clk: Optional[List[Lit]] = None   # GAL20RA10: clock term (registers)
+    arst: Optional[List[Lit]] = None  # GAL20RA10: async reset term (None = never)
+    aprst: Optional[List[Lit]] = None # GAL20RA10: async preset term (None = never)
     name: str = ""
     note: str = ""
 
@@ -167,7 +197,9 @@ class Fuses:
 
     def bits(self) -> List[int]:
         out = list(self.array)
-        if self.chip.is_v8:
+        if self.chip.is_ra:
+            out += self.xor + self.sig
+        elif self.chip.is_v8:
             out += self.xor + self.sig + self.ac1 + self.pt + [self.syn, self.ac0]
         else:
             for x, a in zip(self.xor, self.ac1):
@@ -205,7 +237,7 @@ def build_fuses(prog: Program, galette_unused: bool = False) -> Fuses:
                 f.ac1[k] = 0           # 22V10: OE row cleared either way
 
     def flip(pin: int) -> bool:        # 22V10 registered feedback is /Q
-        if chip.is_v8 or pin not in chip.olmc_pins:
+        if chip.is_v8 or chip.is_ra or pin not in chip.olmc_pins:
             return False
         k = n - 1 - chip.olmc(pin)
         return f.ac1[k] == 0 and f.xor[k] == 1 and prog.olmcs.get(pin, Olmc(pin)).kind == "reg"
@@ -236,6 +268,23 @@ def build_fuses(prog: Program, galette_unused: bool = False) -> Fuses:
         if c.kind not in ("reg", "comb"):
             put_sum(start, 0, count, [], f"pin {pin}")
             continue
+        if chip.is_ra:
+            # rows: OE, CLK, ARST, APRST, 4 terms. Combinational = ARST and
+            # APRST both true (left unprogrammed); its clock row is cleared.
+            put_sum(start, 4, count, c.terms, f"pin {pin} ({c.name})")
+            if c.oe_off:
+                clear(start)
+            elif c.oe is not None:
+                put_row(start, c.oe)
+            if c.kind == "reg":
+                if c.clk is None:
+                    raise ValueError(f"pin {pin} ({c.name}): register without a clock term")
+                put_row(start + 1, c.clk)
+                (put_row(start + 2, c.arst) if c.arst is not None else clear(start + 2))
+                (put_row(start + 3, c.aprst) if c.aprst is not None else clear(start + 3))
+            else:
+                clear(start + 1)
+            continue
         if chip.is_v8:
             offset = 0 if (mode == "simple" or c.kind == "reg") else 1
         else:
@@ -246,7 +295,7 @@ def build_fuses(prog: Program, galette_unused: bool = False) -> Fuses:
                 clear(start)
             elif c.oe is not None:
                 put_row(start, c.oe)
-    if not chip.is_v8:
+    if not chip.is_v8 and not chip.is_ra:
         (put_row(0, prog.ar) if prog.ar is not None else clear(0))
         (put_row(chip.rows - 1, prog.sp) if prog.sp is not None else clear(chip.rows - 1))
     for i, ch in enumerate(prog.signature.encode("ascii", "replace")[:8]):
@@ -280,7 +329,8 @@ def jedec_text(f: Fuses, header: str = "") -> str:
         for b in row:
             add(b)
         idx += chip.cols
-    groups = ([len(f.xor), 64, len(f.ac1), 64, 1, 1] if chip.is_v8 else [2 * len(f.xor), 64])
+    groups = ([len(f.xor), 64] if chip.is_ra else
+              [len(f.xor), 64, len(f.ac1), 64, 1, 1] if chip.is_v8 else [2 * len(f.xor), 64])
     for g in groups:
         chunk = bits[idx:idx + g]
         out.append(f"*L{idx:04d} " + "".join(map(str, chunk)))
@@ -319,7 +369,12 @@ class GalModel:
         n = len(chip.olmc_pins)
         array = chip.rows * chip.cols
         self.array = bits[:array]
-        if chip.is_v8:
+        self.clk_prev: Dict[int, Optional[int]] = {}
+        if chip.is_ra:
+            self.xor = bits[array:array + n]
+            self.ac1 = [0] * n
+            self.mode = ""
+        elif chip.is_v8:
             self.xor = bits[array:array + n]
             self.ac1 = bits[array + n + 64:array + 2 * n + 64]
             syn, ac0 = bits[chip.total - 2], bits[chip.total - 1]
@@ -343,8 +398,17 @@ class GalModel:
     def _k(self, i: int) -> int:
         return len(self.chip.olmc_pins) - 1 - i
 
+    def _row_all(self, r: int, value: int) -> bool:
+        base = r * self.chip.cols
+        return all(b == value for b in self.array[base:base + self.chip.cols])
+
     def _kind(self, i: int) -> str:
         k = self._k(i)
+        if self.chip.is_ra:
+            start = self.chip.row_start[i]
+            if self._row_all(start + 2, 1) and self._row_all(start + 3, 1):
+                return "comb"                     # ARST and APRST always true
+            return "reg"
         if self.chip.is_v8:
             if self.mode == "simple":
                 return "input" if self.ac1[k] else "comb"
@@ -365,7 +429,7 @@ class GalModel:
         chip = self.chip
         for c, p in self.col_pin.items():
             i = chip.olmc(p)
-            if i is not None and self._kind(i) == "reg":
+            if i is not None and self._kind(i) == "reg" and not chip.is_ra:
                 v = self.state[p]
                 if not chip.is_v8:           # 22V10 feeds back /Q
                     v = 1 - v
@@ -381,6 +445,22 @@ class GalModel:
 
     def _outputs(self, cv: Dict[int, int]) -> Dict[int, Tuple[bool, int]]:
         chip, out = self.chip, {}
+        if chip.is_ra:                       # feedback is the pin; async terms act now
+            for i, p in enumerate(chip.olmc_pins):
+                start, k = chip.row_start[i], self._k(i)
+                oe = self._row(start, cv) and self.pins.get(13) == 0
+                ar, ap = self._row(start + 2, cv), self._row(start + 3, cv)
+                if ar and ap:
+                    s = self._sum(i, cv, 4)
+                    v = s
+                else:
+                    if ar:
+                        self.state[p] = 0
+                    elif ap:
+                        self.state[p] = 1
+                    v = self.state.setdefault(p, 0)
+                out[p] = (bool(oe), v if self.xor[k] else 1 - v)
+            return out
         for i, p in enumerate(chip.olmc_pins):
             kind, k = self._kind(i), self._k(i)
             start = chip.row_start[i]
@@ -393,7 +473,7 @@ class GalModel:
                 out[p] = (bool(oe), s if self.xor[k] else 1 - s)
             else:
                 if chip.is_v8:
-                    oe = self.pins.get(11) == 0
+                    oe = self.pins.get(chip.oe_pin) == 0
                     out[p] = (oe, self.state[p])
                 else:
                     q = self.state[p]
@@ -404,7 +484,7 @@ class GalModel:
         for p, v in self.ext.items():
             self.pins[p] = v
         for _ in range(64):
-            if not self.chip.is_v8 and self._row(0, self._colvals()):     # AR
+            if not self.chip.is_v8 and not self.chip.is_ra and self._row(0, self._colvals()):  # 22V10 AR
                 for p in self.state:
                     self.state[p] = 0
             cv = self._colvals()
@@ -425,6 +505,22 @@ class GalModel:
 
     def step(self) -> None:
         self._settle()
+        if self.chip.is_ra:                  # every register has its own clock term
+            for _ in range(50):
+                cv = self._colvals()
+                fire = {}
+                for i, p in enumerate(self.chip.olmc_pins):
+                    start = self.chip.row_start[i]
+                    ck = self._row(start + 1, cv)
+                    ar, ap = self._row(start + 2, cv), self._row(start + 3, cv)
+                    if self.clk_prev.get(p) == 0 and ck == 1 and not (ar or ap):
+                        fire[p] = self._sum(i, cv, 4)
+                    self.clk_prev[p] = ck
+                if not fire:
+                    return
+                self.state.update(fire)
+                self._settle()
+            raise RuntimeError("GAL clock terms did not settle")
         clk = self.pins.get(1)
         has_reg = any(self._kind(i) == "reg" for i in range(len(self.chip.olmc_pins)))
         if has_reg and self.prev_clk == 0 and clk == 1:
@@ -619,7 +715,10 @@ class Need:
     var: int = -1                      # the variable whose value is this pin
     var_inverted: bool = False         # pin = NOT var
     forced: Optional[bool] = None      # polarity forced (active_high) by async reset
-    global_oe: bool = False            # 16V8 registered: enabled by pin 11
+    global_oe: bool = False            # V8 registered: enabled by the /OE pin
+    clk: Optional[Cube] = None         # GAL20RA10: clock term
+    rst: Optional[Cube] = None         # GAL20RA10: async reset of the design's flop (q -> 0)
+    set_: Optional[Cube] = None        # GAL20RA10: async set (q -> 1)
     what: str = ""
 
     def terms(self, active_high: bool) -> List[Cube]:
@@ -666,8 +765,93 @@ def _single_cube(b: Bdd, f: int) -> Optional[Cube]:
     return None
 
 
+def _needs_ra(logic: Logic, chip: Chip, errors: List[str], notes: List[str]):
+    """GAL20RA10: every register has its own clock, reset and preset term,
+    so any clock (either edge, several clocks) and async set/reset fit, as
+    long as each is one product term. Feedback comes from the pins, so a
+    register that isn't an output still drives its pin."""
+    b = logic.bdd
+    needs: List[Need] = []
+    flop_by_var = {f.var: f for f in logic.flops}
+    latch_by_var = {l.var: l for l in logic.latches}
+    shared: Dict[int, OutPort] = {}
+    inverted: Dict[int, bool] = {}
+    for op in logic.outputs:
+        lit = b.as_literal(op.data)
+        if op.bidir or op.oe != 1 or not lit or lit[0] in shared:
+            continue
+        if lit[0] in flop_by_var:
+            shared[lit[0]] = op
+            inverted[lit[0]] = lit[1] == 0
+        elif lit[0] in latch_by_var and lit[1] == 1:
+            shared[lit[0]] = op
+    for f in logic.flops:
+        clk = _single_cube(b, f.clk)
+        if clk is None:
+            errors.append(f"flip-flop {f.name}: its clock needs more than one product term")
+            continue
+        rst = _single_cube(b, f.r) if f.r else None
+        st = _single_cube(b, f.s) if f.s else None
+        if (f.r and rst is None) or (f.s and st is None):
+            errors.append(f"flip-flop {f.name}: its asynchronous set/reset needs more than one "
+                          f"product term")
+            continue
+        if f.r and f.s and b.and_(f.r, f.s) != 0:
+            errors.append(f"flip-flop {f.name}: set and reset can be active together; the "
+                          f"GAL20RA10 then makes the output combinational")
+            continue
+        op = shared.get(f.var)
+        inv = inverted.get(f.var, False)
+        nxt = b.not_(f.d) if inv else f.d
+        n = Need(op.name if op else f.name, "reg", _cover(b, nxt), port=op.name if op else None,
+                 var=f.var, var_inverted=inv, what=f"register {f.name}")
+        n.clk, n.rst, n.set_ = clk, rst, st
+        if not op:
+            notes.append(f"register {f.name} has no output of its own but drives its pin "
+                         f"(the GAL20RA10 feeds registers back from the pins): leave that pin "
+                         f"unconnected")
+        needs.append(n)
+    for l in logic.latches:
+        op = shared.get(l.var)
+        q = {l.var: 1}
+
+        def with_q(cubes):
+            return [{**c, **q} for c in cubes if c.get(l.var, 1) == 1]
+        cubes = b.isop(b.and_(l.e, l.d)) + with_q(b.isop(b.not_(l.e))) + with_q(b.isop(l.d))
+        uniq = []
+        for c in cubes:
+            if c not in uniq:
+                uniq.append(c)
+        needs.append(Need(op.name if op else l.name, "comb", {True: uniq, False: uniq},
+                          feedback=True, port=op.name if op else None, var=l.var, forced=True,
+                          what=f"latch {l.name}"))
+    taken = {op.name for op in shared.values()}
+    for op in logic.outputs:
+        if op.name in taken:
+            continue
+        if op.oe == 0:
+            needs.append(Need(op.name, "input" if op.bidir else "comb", {True: [], False: []},
+                              port=op.name, var=op.var if op.bidir else -1,
+                              oe_off=not op.bidir, what="never driven"))
+            continue
+        n = Need(op.name, "comb", _cover(b, op.data, op.oe), port=op.name,
+                 feedback=op.bidir, var=op.var if op.bidir else -1,
+                 what="bidirectional pin" if op.bidir else "output")
+        if op.oe != 1:
+            c = _single_cube(b, op.oe)
+            if c is None:
+                errors.append(f"{op.name}: its output enable needs more than one product term")
+                continue
+            n.oe = [c]
+        needs.append(n)
+    notes.append("tie pin 13 (/OE) to GND and pin 1 (/PL, preload) to VCC")
+    return needs, None, None, None
+
+
 def _needs(logic: Logic, chip: Chip, errors: List[str], notes: List[str]):
     """What needs OLMCs, plus the clock and global-OE signals."""
+    if chip.is_ra:
+        return _needs_ra(logic, chip, errors, notes)
     b = logic.bdd
     needs: List[Need] = []
     clock = None
@@ -695,7 +879,7 @@ def _needs(logic: Logic, chip: Chip, errors: List[str], notes: List[str]):
     if asyncs:
         if chip.is_v8:
             errors.append("asynchronous set/reset used (e.g. " + asyncs[0].name +
-                          "); the GAL16V8 has none - use a GAL22V10")
+                          f"); the {chip.name} has none - use a GAL22V10")
         else:
             a = b.or_(asyncs[0].r, asyncs[0].s)
             for f in logic.flops:
@@ -732,7 +916,7 @@ def _needs(logic: Logic, chip: Chip, errors: List[str], notes: List[str]):
                 and lit[0] not in shared:
             shared[lit[0]] = op
     if chip.is_v8 and reg_ports:
-        # Registered outputs share pin 11 (/OE): pick the commonest enable.
+        # Registered outputs share the /OE pin: pick the commonest enable.
         def oe_key(op):
             if op.oe == 1:
                 return "1"
@@ -779,7 +963,7 @@ def _needs(logic: Logic, chip: Chip, errors: List[str], notes: List[str]):
             if chip.is_v8:
                 n.global_oe = True
                 notes.append(f"register {f.name} has no output of its own but still drives "
-                             f"its pin when /OE (pin 11) is low: leave that pin unconnected")
+                             f"its pin when /OE (pin {chip.oe_pin}) is low: leave that pin unconnected")
             else:
                 n.oe_off = True
         needs.append(n)
@@ -856,6 +1040,10 @@ def fit(logic: Logic, device: str, locks: Dict[str, int], name: str = "") -> Fit
             used_vars |= set(c)
     if ar_cube:
         used_vars |= set(ar_cube)
+    for n in needs:
+        for c in (n.clk, n.rst, n.set_):
+            if c:
+                used_vars |= set(c)
     errs_by_mode = []
     for mode in modes:
         r = _place(logic, chip, mode, needs, clock, oe_input, ar_cube, locks, used_vars)
@@ -881,13 +1069,13 @@ def _place(logic: Logic, chip: Chip, mode: str, needs: List[Need], clock, oe_inp
         reserved[1] = clock
     if chip.is_v8 and mode == "registered":
         if oe_input:
-            reserved[11] = oe_input
+            reserved[chip.oe_pin] = oe_input
         if clock and logic.var_of[clock] in used_vars:
             res.errors.append(f"{clock} is the clock (pin 1) and is also used as logic; in a "
-                              f"GAL16V8's registered mode pin 1 is the clock only")
+                              f"{chip.name}'s registered mode pin 1 is the clock only")
         if oe_input and logic.var_of[oe_input] in used_vars:
-            res.errors.append(f"{oe_input} is the registered outputs' /OE (pin 11) and is also "
-                              f"used as logic; in registered mode pin 11 is /OE only")
+            res.errors.append(f"{oe_input} is the registered outputs' /OE (pin {chip.oe_pin}) and "
+                              f"is also used as logic; in registered mode that pin is /OE only")
     if mode == "simple":
         bad = [n.name for n in needs if n.oe is not None or n.feedback or n.oe_off]
         if bad:
@@ -1021,6 +1209,14 @@ def _place(logic: Logic, chip: Chip, mode: str, needs: List[Need], clock, oe_inp
             c.terms = [lits(x) for x in n.terms(n.best)]
             c.oe_off = n.oe_off
             c.oe = [y for x in n.oe for y in lits(x)] if n.oe else None
+            if chip.is_ra and n.kind == "reg":
+                c.clk = lits(n.clk)
+                # The register holds Q; the pin shows Q (active high) or /Q, and
+                # the design's flop is the pin or its complement.
+                flip = (not n.best) ^ n.var_inverted
+                to0, to1 = (n.set_, n.rst) if flip else (n.rst, n.set_)
+                c.arst = lits(to0) if to0 is not None else None
+                c.aprst = lits(to1) if to1 is not None else None
         for i in in_names:
             p = pins.get(i)
             if p in chip.olmc_pins:
@@ -1035,7 +1231,7 @@ def _place(logic: Logic, chip: Chip, mode: str, needs: List[Need], clock, oe_inp
         prog.pin_names[p] = sig
     res.ok, res.pins, res.program = True, pins, prog
     if chip.is_v8 and mode == "registered" and not oe_input:
-        res.notes.append("tie pin 11 (/OE) to GND: it enables the registered outputs")
+        res.notes.append(f"tie pin {chip.oe_pin} (/OE) to GND: it enables the registered outputs")
     ded =dedicated_inputs(chip, mode)
     res.inputs_total = len(ded)
     res.inputs_used = sum(1 for p in pins.values() if p in ded)
@@ -1073,6 +1269,9 @@ def pld_text(prog: Program, title: str = "") -> str:
             names[p] = "GND"
         elif p == chip.vcc:
             names[p] = "VCC"
+        elif chip.is_ra and p in (1, 13):
+            names[p] = "/PL" if p == 1 else "/OE"
+            used.add(names[p][1:])
         elif p in prog.pin_names:
             names[p] = _ident(prog.pin_names[p], used)
         elif p in prog.olmcs and prog.olmcs[p].kind in ("reg", "comb"):
@@ -1104,6 +1303,12 @@ def pld_text(prog: Program, title: str = "") -> str:
             lines.append(f"{lhs}.T = {sop(c.terms)}")
         else:
             lines.append(f"{lhs} = {sop(c.terms)}")
+        if chip.is_ra and c.kind == "reg":
+            lines.append(f"{names[p]}.CLK = {term(c.clk or [])}")
+            if c.arst is not None:
+                lines.append(f"{names[p]}.ARST = {term(c.arst)}")
+            if c.aprst is not None:
+                lines.append(f"{names[p]}.APRST = {term(c.aprst)}")
         if c.oe_off and not (chip.is_v8 and c.kind == "reg"):
             lines.append(f"{names[p]}.E = GND")
         elif c.oe is not None:
@@ -1135,7 +1340,7 @@ def verify(netlist_path: Path, top: str, fuses: Fuses, pins: Dict[str, int],
         e = tbuf_en.get(sim.ports[port]["bits"][0])
         return e is not None and sim._v(e) == 1
     external: set = set()               # inouts driven from outside right now
-    oe11 = next((n for n, p in pins.items() if p == 11 and n in ins), None) \
+    oe11 = next((n for n, p in pins.items() if p == fuses.chip.oe_pin and n in ins), None) \
         if fuses.chip.is_v8 and model.mode == "registered" else None
     bad: List[str] = []
     checked = 0
@@ -1147,7 +1352,9 @@ def verify(netlist_path: Path, top: str, fuses: Fuses, pins: Dict[str, int],
                 (external.add if v is not None else external.discard)(k)
         ext = {pins[k]: v for k, v in values.items()}
         if fuses.chip.is_v8 and model.mode == "registered" and oe11 is None:
-            ext[11] = 0
+            ext[fuses.chip.oe_pin] = 0
+        if fuses.chip.is_ra:
+            ext[13], ext[1] = 0, 1
         model.set(ext)
 
     def compare(when: str) -> None:
@@ -1281,7 +1488,9 @@ def report_lines(b: GalBuild, device: str) -> List[str]:
     cells = {c["name"] for c in fr.cells if c["kind"] != "unused"}
     ins = sorted(((p, s) for s, p in b.pins.items() if s not in cells), key=lambda t: t[0])
     roles = {1: ", clock" if fr.mode == "registered" or any(c["kind"] == "reg" for c in fr.cells)
-             else "", 11: ", /OE" if fr.mode == "registered" else ""}
+             else ""}
+    if fr.mode == "registered":
+        roles[fr.chip.oe_pin] = ", /OE"
     if ins:
         lines.append("  inputs: " + ", ".join(
             f"{s} ({p}{roles.get(gal_dip(b, p), '')})" for p, s in ins))

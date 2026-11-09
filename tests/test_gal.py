@@ -37,6 +37,8 @@ def parse_pld(text: str) -> gal.Program:
             break
         body.append(l)
     tokens = re.findall(r"/?[A-Za-z0-9_]+(?:\.[A-Za-z]+)?|=|\+|\*", " ".join(body))
+    for name in ("PL", "OE"):            # GAL20RA10's reserved pins, never in equations
+        decl.setdefault(name, (0, False))
     eqns, i = [], 0
     while i < len(tokens):
         lhs = tokens[i]
@@ -87,6 +89,9 @@ def parse_pld(text: str) -> gal.Program:
             c.oe = sop(rhs)[0] if sop(rhs) else None
             if not sop(rhs):
                 c.oe_off = True
+            continue
+        if suffix in ("CLK", "ARST", "APRST"):
+            setattr(c, suffix.lower(), sop(rhs)[0] if sop(rhs) else None)
             continue
         c.kind = "reg" if suffix == "R" else "comb"
         kinds[p] = suffix or "C"
@@ -144,7 +149,7 @@ class TestBdd(unittest.TestCase):
 class TestJedec(unittest.TestCase):
     def test_matches_galette_bit_for_bit(self):
         files = sorted(GALETTE.glob("*.pld"))
-        self.assertGreaterEqual(len(files), 11)
+        self.assertGreaterEqual(len(files), 20)
         for pld in files:
             with self.subTest(pld.name):
                 prog = parse_pld(pld.read_text())
@@ -165,13 +170,16 @@ class TestJedec(unittest.TestCase):
         equations say (pin-level: a registered pin shows its equation after
         the clock; AR clears the register)."""
         for name in ("GAL16V8_combinatorial", "GAL16V8_reg", "GAL22V10_reg",
-                     "GAL22V10_invertedreg", "GAL22V10_tri"):
+                     "GAL22V10_invertedreg", "GAL22V10_tri", "GAL20V8_reg",
+                     "GAL20V8_complex", "GAL20V8_combinatorial", "GAL20RA10_combinatorial",
+                     "GAL20RA10_tri"):
             with self.subTest(name):
                 prog = parse_pld((GALETTE / f"{name}.pld").read_text())
                 chip = prog.chip
                 model = gal.GalModel(chip, gal.build_fuses(prog, galette_unused=True).bits())
                 registered = any(c.kind == "reg" for c in prog.olmcs.values())
-                fixed = {1} | ({11} if chip.is_v8 and registered else set())
+                fixed = {1} | ({chip.oe_pin} if chip.is_v8 and registered else set()) | \
+                    ({13} if chip.is_ra else set())
                 inputs = [p for p in range(1, chip.pins) if p != chip.gnd and p not in fixed
                           and (p not in prog.olmcs or prog.olmcs[p].kind == "input")]
                 rng = random.Random(5)
@@ -185,8 +193,10 @@ class TestJedec(unittest.TestCase):
                 for _ in range(60):
                     ext = {p: rng.getrandbits(1) for p in inputs}
                     ext[1] = 0
-                    if 11 in fixed:
-                        ext[11] = 0
+                    if chip.oe_pin in fixed and chip.is_v8:
+                        ext[chip.oe_pin] = 0
+                    if chip.is_ra:
+                        ext[1], ext[13] = 1, 0
                     model.set(ext)
                     model.step()
                     pins = {**ext, **{p: model.pins.get(p) for p in prog.olmcs}}
@@ -273,12 +283,13 @@ def build(text):
 
 class TestTables(unittest.TestCase):
     def test_packages(self):
-        for name, dip in (("GAL16V8", 20), ("GAL22V10", 24)):
+        for name, dip in (("GAL16V8", 20), ("GAL20V8", 24), ("GAL20RA10", 24), ("GAL22V10", 24)):
             dev = devices.DEVICES[name]
             self.assertEqual(dev.kind, "gal")
             for pkg in dev.packages.values():
                 with self.subTest(device=name, package=pkg.name):
-                    groups = [set(pkg.io), set(pkg.inputs.values()), set(pkg.power), set(pkg.nc)]
+                    groups = [set(pkg.io), set(pkg.inputs.values()), set(pkg.power), set(pkg.nc),
+                              set(pkg.reserved.values())]
                     self.assertEqual(sum(map(len, groups)), pkg.pin_count)
                     self.assertEqual(set().union(*groups), set(range(1, pkg.pin_count + 1)))
                     self.assertEqual(len(pkg.io), dev.macrocells)
@@ -323,6 +334,35 @@ class TestFit(unittest.TestCase):
     def test_374_is_a_16r8(self):
         d, b = self.check(reg374(), "registered", 8)
         self.assertEqual((b.pins["CLK"], b.pins["OE"]), (1, 11))
+
+    def test_20v8(self):
+        d, b = self.check(reg374("GAL20V8 DIP24"), "registered", 8)
+        self.assertEqual((b.pins["CLK"], b.pins["OE"]), (1, 13))
+        d, b = self.check(DEC139.replace("GAL16V8 DIP20", "GAL20V8 PLCC28"), "simple", 4)
+        self.assertTrue(all(p not in (1, 8, 15, 22) for p in b.pins.values()))
+
+    def test_20ra10_registers_with_their_own_clocks(self):
+        # two flip-flops on separate clocks, one falling-edge JK, async clears
+        text = ("design ff\ndevice GAL20RA10 DIP24\npart U1 74x74\npart U2 74x112\n"
+                "net P1 const=1: U1.4 U1.10 U2.4\n"
+                "net CLR1 ext: U1.1\nnet D1 ext: U1.2\nnet CK1 ext: U1.3\nnet Q1 ext: U1.5\n"
+                "net CLR2 ext: U1.13\nnet D2 ext: U1.12\nnet CK2 ext: U1.11\nnet Q2N ext: U1.8\n"
+                "net JKCLK ext: U2.1\nnet K ext: U2.2\nnet J ext: U2.3\nnet JKQ ext: U2.5\n"
+                "net JKCLR ext: U2.15\n")
+        d, b = self.check(text, "", 3)
+        self.assertIn(".CLK = /JKCLK", b.pld)          # falling edge = inverted clock term
+        self.assertIn("ARST", b.pld)
+        self.assertIn("tie pin 13 (/OE) to GND", " ".join(b.fit.notes))
+
+    def test_20ra10_async_parallel_load(self):
+        # a '165 loads asynchronously (a set or reset per bit): fine on a 20RA10
+        text = ("design sr\ndevice GAL20RA10 DIP24\npart U1 74x165\nnet INH const=0: U1.15\n"
+                "net LD ext: U1.1\nnet CLK ext: U1.2\nnet SER ext: U1.10\nnet QH ext: U1.9\n"
+                + "".join(f"net P{c} ext: U1.{n}\n" for c, n in
+                          zip("ABCDEFGH", (11, 12, 13, 14, 3, 4, 5, 6))))
+        d, b = self.check(text, "", 8)
+        d, b2 = build(text.replace("GAL20RA10", "GAL22V10"))
+        self.assertFalse(b2.fit.ok)                     # a 22V10 has one reset for all
 
     def test_bidirectional(self):
         d, b = self.check(bidir245(), "", 6)
