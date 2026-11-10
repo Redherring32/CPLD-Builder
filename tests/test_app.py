@@ -86,14 +86,35 @@ class TestProjects(TempHome):
         with self.assertRaises(ValueError):
             p.open(self.tmp / "missing-folder" / "x.cg")
 
-    def test_first_run_copies_the_example(self):
+    def test_starts_with_an_empty_project(self):
         from cpldglue import app
+        folder = self.tmp / "home" / "Documents" / "CPLD-Builder"
         first = app.default_project()
-        self.assertEqual(first, self.tmp / "home" / "Documents" / "CPLD-Builder" / "tinytendo.cg")
-        self.assertTrue(first.exists())
+        self.assertEqual(first, folder / "untitled.cg")
+        self.assertFalse(first.exists())                    # nothing written until saved
+        self.assertEqual(api.Project(first).design.parts, {})
+        # recent projects don't change that; a saved untitled.cg isn't reused
         deps.remember_project(self.tmp / "other.cg")
         (self.tmp / "other.cg").write_text("design other\n")
-        self.assertEqual(app.default_project(), (self.tmp / "other.cg").resolve())
+        first.write_text("design untitled\n")
+        self.assertEqual(app.default_project(), folder / "untitled-2.cg")
+        self.assertFalse((folder / "tinytendo.cg").exists())   # no example copied
+
+    def test_example_is_copied_when_opened(self):
+        from cpldglue import app
+        p = app.example_copy("tinytendo")
+        self.assertEqual(p, self.tmp / "home" / "Documents" / "CPLD-Builder" / "examples" / "tinytendo.cg")
+        self.assertIn("74HC139", p.read_text())
+        p.write_text("design edited\n")                    # the user's edits are kept
+        self.assertEqual(app.example_copy("tinytendo").read_text(), "design edited\n")
+        with self.assertRaises(ValueError):
+            app.example_copy("nope")
+
+    def test_saving_a_new_project_makes_it_recent(self):
+        p = api.Project(self.tmp / "fresh.cg")
+        self.assertEqual(deps.recent_projects(), [])
+        p.save(p.design, None)
+        self.assertEqual([Path(r).resolve() for r in deps.recent_projects()], [p.path.resolve()])
 
     def test_app_passes_cli_commands_through(self):
         import contextlib

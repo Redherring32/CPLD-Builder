@@ -514,9 +514,14 @@ def generate(design: Design, assign: bool = True) -> Result:
     dev = devices.DEVICES.get(design.device.upper())
     is_gp = bool(dev and dev.kind == "greenpak")
     if is_gp:
-        r.notes.append(f"{dev.name} is a GreenPAK: size the logic with the LUT "
-                       f"check (needs Yosys) and enter it in Renesas Go Configure "
-                       f"from the LUT sheet; {dev.note}.")
+        if dev.name in ("SLG46826", "SLG46824"):
+            r.notes.append(f"{dev.name} is a GreenPAK: the LUT check (needs Yosys) "
+                           f"also writes its bitstream and an Arduino I2C programmer; "
+                           f"{dev.note}.")
+        else:
+            r.notes.append(f"{dev.name} is a GreenPAK: size the logic with the LUT "
+                           f"check (needs Yosys) and enter it in Renesas Go Configure "
+                           f"from the LUT sheet; {dev.note}.")
         dev = None                 # no macrocell estimate for GreenPAKs
     is_ice40 = bool(dev and dev.kind == "ice40")
     if is_ice40:

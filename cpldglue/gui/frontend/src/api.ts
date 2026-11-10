@@ -89,6 +89,19 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   }));
 }
 
+/** The desktop app's native file dialog, filtered to KiCad files; null in a
+ *  plain browser (use the in-app FileBrowser there). */
+export function nativeKicadPicker(): ((current: string) => Promise<string | null>) | null {
+  const b = bridge();
+  return b ? (current) => b.pick("kicad", current) : null;
+}
+export interface DirListing {
+  path: string; parent: string | null; dirs: string[]; files: string[]; roots: string[]; sep: string;
+}
+export function listDir(path: string) {
+  return post<DirListing>("api/fs/list", { path });
+}
+
 export async function kicadFind(): Promise<string[]> {
   return (await json<{ files: string[] }>(await fetch("api/kicad/find"))).files;
 }
@@ -129,13 +142,20 @@ export function openInstaller() {
 export function openProject(path: string) {
   return post<ProjectInfo>("api/project/open", { path });
 }
+export interface ExampleInfo { id: string; title: string }
+export async function getExamples(): Promise<ExampleInfo[]> {
+  return (await json<{ examples: ExampleInfo[] }>(await fetch("api/examples"))).examples;
+}
+export function openExample(id: string) {
+  return post<ProjectInfo>("api/project/example", { id });
+}
 export function saveProjectAs(path: string, design: Design) {
   return post<ProjectInfo>("api/project/saveas", { path, design });
 }
 
 /** The desktop app (pywebview) exposes native file dialogs and the window
  *  title; in a plain browser these fall back to a prompt / document.title. */
-type Bridge = { pick: (mode: "open" | "save", current: string) => Promise<string | null>;
+type Bridge = { pick: (mode: "open" | "save" | "kicad", current: string) => Promise<string | null>;
                 title: (t: string) => Promise<void>;
                 copy: (text: string) => Promise<boolean> };
 function bridge(): Bridge | null {
@@ -160,10 +180,15 @@ export function setTitle(t: string) {
 if (typeof window !== "undefined")
   window.addEventListener("pywebviewready", () => { if (lastTitle) setTitle(lastTitle); });
 
+export interface GreenPakBitstream {
+  ok: boolean; errors: string[]; notes?: string[]; check: string; placement?: string[];
+  files?: { txt: string; ino: string; bin: string; mask: string };
+}
 export interface GreenPakResult {
   ok: boolean; error?: string; fits: boolean; notes: string[]; unplaced: string[];
   cells: { type: string; title: string; used: number; total: number }[];
   luts: number; flops: number; oe: number; sheet: string;
+  bitstream?: GreenPakBitstream | null;
 }
 export function greenpak(design: Design) {
   return post<GreenPakResult>("api/greenpak", { design });

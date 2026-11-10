@@ -34,7 +34,7 @@ LEGAL_FFS = ["$_DFF_P_", "$_DFF_N_", "$_DFF_PN0_", "$_DFF_PN1_", "$_DFF_NN0_", "
              "$_DFFSR_PNN_", "$_DLATCH_P_", "$_DLATCH_N_", "$_DLATCH_PN0_", "$_DLATCH_PN1_"]
 
 
-def script(top: str, verilog: str) -> str:
+def script(top: str, verilog: str, lut: int = 4) -> str:
     legal = " ".join(f"-cell {c} 01" for c in LEGAL_FFS)
     return f"""read_verilog {verilog}
 hierarchy -top {top}
@@ -43,7 +43,7 @@ flatten
 tribuf
 synth -top {top} -flatten
 dfflegalize {legal}
-abc -lut 4
+abc -lut {lut}
 opt_clean
 write_json mapped.json
 """
@@ -98,6 +98,8 @@ class Mapping:
     pins: Dict[str, int]
     fit: Fit
     notes: List[str] = field(default_factory=list)
+    tbuf_data: Dict[str, str] = field(default_factory=dict)   # 3-state port -> data net
+    port_nets: Dict[str, str] = field(default_factory=dict)   # output/inout port -> its net
 
 
 # ---- logic minimisation for the readable equations --------------------------
@@ -199,7 +201,7 @@ def _read(mapped: dict, top: str):
             names[b] = f"n{next(counter)}"
         return names[b]
 
-    luts, flops, tbufs = [], [], {}
+    luts, flops, tbufs, tbuf_data = [], [], {}, {}
     for cell in mod["cells"].values():
         t, c = cell["type"], cell["connections"]
         if t == "$lut":
@@ -221,10 +223,13 @@ def _read(mapped: dict, top: str):
             flops.append(f)
         elif t == "$_TBUF_":
             tbufs[name(c["Y"][0])] = name(c["E"][0])
-    return luts, flops, tbufs
+            tbuf_data[name(c["Y"][0])] = name(c["A"][0])
+    port_nets = {p: name(info["bits"][0]) for p, info in mod["ports"].items()
+                 if info["direction"] != "input"}
+    return luts, flops, tbufs, tbuf_data, port_nets
 
 
-def map_design(design: Design, r: Result, workdir: Path) -> Mapping:
+def map_design(design: Design, r: Result, workdir: Path, lut: int = 4) -> Mapping:
     dev, _ = devices.get_package(design.device, design.package)
     if dev.kind != "greenpak":
         raise ValueError(f"{dev.name} is not a GreenPAK")
@@ -233,9 +238,11 @@ def map_design(design: Design, r: Result, workdir: Path) -> Mapping:
     top = sanitize(design.name)
     workdir.mkdir(parents=True, exist_ok=True)
     (workdir / f"{top}.v").write_text(r.verilog, encoding="utf-8")
-    yosys.run_script(script(top, f"{top}.v"), workdir, "greenpak.log")
-    luts, flops, tbufs = _read(json.loads((workdir / "mapped.json").read_text(encoding="utf-8")), top)
-    m = Mapping(luts, flops, tbufs, dict(r.pins), fit(dev, luts, flops))
+    yosys.run_script(script(top, f"{top}.v", lut), workdir, "greenpak.log")
+    luts, flops, tbufs, tbuf_data, port_nets = _read(
+        json.loads((workdir / "mapped.json").read_text(encoding="utf-8")), top)
+    m = Mapping(luts, flops, tbufs, dict(r.pins), fit(dev, luts, flops),
+                tbuf_data=tbuf_data, port_nets=port_nets)
     if any(not f.placeable for f in flops):
         m.notes.append("Some flip-flops need both an async set and an async reset (like a "
                        "74x74 with PRE and CLR both used); GreenPAK DFFs have one or the other.")
@@ -263,8 +270,34 @@ class Session:
                            "total": m.fit.total[t]} for t in m.fit.total],
                 "luts": len(m.luts), "flops": len(m.flops), "oe": len(m.tbufs),
                 "sheet": sheet_html(design, r, m),
+                "bitstream": bitstream_payload(design, r, m, self.workdir / key[:12] / "bits"),
             }}
         return self.cache[key]
+
+
+def bitstream_payload(design: Design, r: Result, m: Mapping, workdir: Path) -> Optional[dict]:
+    """For parts with a known register map: the bitstream, checked, and the
+    files to program it (see gpbits.py). None for other GreenPAKs."""
+    from . import gpbits
+    if devices.DEVICES[design.device.upper()].name not in gpbits.SUPPORTED:
+        return None
+    if not m.fit.ok:
+        return {"ok": False, "errors": ["the design doesn't fit"], "check": ""}
+    try:
+        b = gpbits.build(design, r, m, workdir)
+    except (RuntimeError, ValueError) as e:
+        return {"ok": False, "errors": [str(e)], "check": ""}
+    out = {"ok": b.ok, "errors": b.errors, "notes": b.notes, "check": b.check,
+           "placement": [f"{c}: {w}" for c, w in b.placement]}
+    if b.bits:
+        import base64
+        out["files"] = {
+            "txt": gpbits.txt_file(b.bits, b.owned),
+            "ino": gpbits.arduino_sketch(b.bits, b.owned, design.name),
+            "bin": base64.b64encode(gpbits.to_bytes(b.bits)).decode(),
+            "mask": base64.b64encode(gpbits.to_bytes(b.owned)).decode(),
+        }
+    return out
 
 
 # ---- the sheet -----------------------------------------------------------------

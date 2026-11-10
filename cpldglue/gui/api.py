@@ -215,6 +215,44 @@ def _natural(s: str):
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", s)]
 
 
+KICAD_EXTS = (".kicad_sch", ".net")
+
+
+def list_dir(path: str, start: Path, exts=KICAD_EXTS) -> dict:
+    """One folder for the in-app file browser: its subfolders and the files
+    with the given extensions (hidden entries and KiCad backups left out).
+    An empty or missing path starts at `start`; a file path opens its folder."""
+    p = Path(path.strip().strip('"')).expanduser() if path and path.strip() else start
+    if p.is_file():
+        p = p.parent
+    while not p.is_dir() and p != p.parent:   # a mistyped path: nearest real folder
+        p = p.parent
+    p = p.resolve()
+    dirs, files = [], []
+    try:
+        entries = sorted(p.iterdir(), key=lambda e: e.name.lower())
+    except OSError as e:
+        raise ValueError(f"can't read {p}: {e.strerror or e}") from None
+    for e in entries:
+        if e.name.startswith((".", "$")) or "backup" in e.name.lower() or "_autosave" in e.name:
+            continue
+        try:
+            if e.is_dir():
+                dirs.append(e.name)
+            elif e.suffix.lower() in exts:
+                files.append(e.name)
+        except OSError:
+            continue
+    roots = []
+    if os.name == "nt":
+        import string
+        roots = [f"{d}:\\" for d in string.ascii_uppercase if Path(f"{d}:\\").exists()]
+    else:
+        roots = ["/", str(Path.home())]
+    return {"path": str(p), "parent": str(p.parent) if p.parent != p else None,
+            "dirs": dirs, "files": files, "roots": roots, "sep": os.sep}
+
+
 def find_schematics(start: Path, limit: int = 40) -> list:
     """KiCad schematics near the project: its folder, then up to two parent
     folders, searching a few levels down. Skips backup folders."""
@@ -461,7 +499,11 @@ class Project:
         current = self.path.stat().st_mtime if self.path.exists() else 0.0
         if not force and base_mtime is not None and abs(current - base_mtime) > 1e-6:
             return {"conflict": True, "mtime": current}
+        first = not self.path.exists()
         save_design(design, self.path)
+        if first:                             # a new project: now it's a recent one
+            from .. import deps
+            deps.remember_project(self.path)
         self.mtime = self.path.stat().st_mtime
         self.design = design
         self.error = ""

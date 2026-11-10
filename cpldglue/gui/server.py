@@ -88,6 +88,10 @@ def make_handler(project: api.Project, builder: "api.Builder | None" = None):
                 return self._json(api.devices_payload())
             if path == "/api/project":
                 return self._json(project.payload())
+            if path == "/api/examples":
+                from ..app import EXAMPLES
+                return self._json({"examples": [{"id": k, "title": t}
+                                                for k, (t, _) in EXAMPLES.items()]})
             if path == "/api/kicad/find":
                 return self._json({"files": api.find_schematics(project.path.parent.resolve())})
             if path.startswith("/api/"):
@@ -98,6 +102,13 @@ def make_handler(project: api.Project, builder: "api.Builder | None" = None):
             if not self._allowed(write=True):
                 return
             path = urlparse(self.path).path
+            if path == "/api/project/example":
+                try:
+                    from ..app import example_copy
+                    project.open(example_copy(self._body()["id"]))
+                    return self._json(project.payload())
+                except (ValueError, KeyError, OSError) as e:
+                    return self._json({"error": str(e)}, 400)
             if path in ("/api/project/open", "/api/project/saveas"):
                 try:
                     body = self._body()
@@ -110,6 +121,12 @@ def make_handler(project: api.Project, builder: "api.Builder | None" = None):
                                         body["path"])
                     return self._json(project.payload())
                 except (ValueError, KeyError, OSError) as e:
+                    return self._json({"error": str(e)}, 400)
+            if path == "/api/fs/list":
+                try:
+                    return self._json(api.list_dir(self._body().get("path", ""),
+                                                   project.path.parent.resolve()))
+                except (ValueError, OSError) as e:
                     return self._json({"error": str(e)}, 400)
             if path == "/api/deps/fetch":
                 try:

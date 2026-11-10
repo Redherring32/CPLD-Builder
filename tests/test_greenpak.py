@@ -44,15 +44,45 @@ def buffers(dev="SLG46826", pkg="TSSOP20", n=4):
 
 class TestTables(unittest.TestCase):
     def test_every_pin_once(self):
-        for name in ("SLG46826", "SLG46620"):
+        gp = [n for n, d in devices.DEVICES.items() if d.kind == "greenpak"]
+        self.assertEqual(len(gp), 11)
+        for name in gp:
             for pkg in devices.DEVICES[name].packages.values():
                 with self.subTest(device=name, package=pkg.name):
                     groups = [set(pkg.io), set(pkg.inputs.values()), set(pkg.power),
-                              set(pkg.reserved.values())]
-                    self.assertEqual(sum(map(len, groups)), 20)
-                    self.assertEqual(set().union(*groups), set(range(1, 21)))
+                              set(pkg.reserved.values()), set(pkg.nc)]
+                    self.assertEqual(sum(map(len, groups)), pkg.pin_count)
+                    self.assertEqual(set().union(*groups), set(range(1, pkg.pin_count + 1)))
                     self.assertTrue(set(pkg.out_only) <= set(pkg.io))
                     self.assertTrue(set(pkg.no_oe) <= set(pkg.io))
+
+    def test_new_parts_from_their_datasheets(self):
+        D = devices.DEVICES
+        # SLG46824 = SLG46826 pins; SLG46621 = SLG46620 with VDD2 on pin 14
+        for p in ("STQFN20", "TSSOP20"):
+            a, b = D["SLG46824"].packages[p], D["SLG46826"].packages[p]
+            self.assertEqual((a.io, a.no_oe, a.out_only, a.reserved), (b.io, b.no_oe, b.out_only, b.reserved))
+        p21 = D["SLG46621"].packages["STQFN20"]
+        self.assertEqual(p21.power[14], "VCC")
+        self.assertNotIn(14, p21.io)
+        # small parts: which pins have an output enable
+        self.assertEqual(sorted(set(D["SLG46108"].packages["STQFN8"].io) -
+                                set(D["SLG46108"].packages["STQFN8"].no_oe)), [4, 8])
+        self.assertEqual(sorted(set(D["SLG46110"].packages["STQFN12"].io) -
+                                set(D["SLG46110"].packages["STQFN12"].no_oe)), [6, 10])
+        self.assertEqual(D["SLG46110"].packages["STQFN12"].nc, [5, 11])
+        self.assertEqual(sorted(set(D["SLG46140"].packages["STQFN14"].io) -
+                                set(D["SLG46140"].packages["STQFN14"].no_oe)),
+                         [3, 4, 5, 7, 9, 12, 13, 14])
+        # SLG4653x: OE on 3, 5, 7, 10, 13, 14, 16, 18, 19; I2C pins input only
+        for name in ("SLG46531", "SLG46533", "SLG46537"):
+            p = D[name].packages["STQFN20"]
+            self.assertEqual(sorted(set(p.io) - set(p.no_oe)), [3, 5, 7, 10, 13, 14, 16, 18, 19])
+            self.assertEqual(sorted(p.inputs.values()), [2, 8, 9])
+        self.assertEqual(D["SLG46538"].packages["STQFN20"].power[14], "VCC")
+        # logic cells: e.g. the SLG46533's 3 + 12 DFF-capable cells
+        self.assertEqual(D["SLG46533"].resources["lut2_dff"] + D["SLG46533"].resources["lut3_dff"], 15)
+        self.assertEqual(sum(D["SLG46140"].resources.values()), 16)
 
     def test_slg46826_from_datasheet(self):
         d = devices.DEVICES["SLG46826"]

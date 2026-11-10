@@ -1,13 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
 import type { KiComponent, KiPreview } from "./api";
-import type { Design, Part } from "./types";
+import type { Design, DeviceInfo, Part } from "./types";
+import { deviceLabel } from "./deviceLabel";
+import { FileBrowser } from "./FileBrowser";
 
 /** Pick chips from a KiCad schematic and replace the project's chips with them. */
-export function ImportDialog({ design, parts, onImport, onClose }: {
-  design: Design; parts: Part[];
+export function ImportDialog({ design, parts, devices, onImport, onClose }: {
+  design: Design; parts: Part[]; devices: DeviceInfo[];
   onImport: (d: Design) => void; onClose: () => void;
 }) {
+  // The target chip for the imported design (starts as the project's).
+  const [device, setDevice] = useState(design.device);
+  const [pkg, setPkg] = useState(design.package);
+  const target = useMemo(() => ({ ...design, device, package: pkg }), [design, device, pkg]);
+  const deviceNames = useMemo(() => [...new Set(devices.map((d) => d.device))], [devices]);
+  const packages = devices.filter((d) => d.device === device).map((d) => d.package);
+  const pickDevice = (dev: string) => {
+    setDevice(dev);
+    const pk = devices.filter((x) => x.device === dev).map((x) => x.package);
+    if (pk.length && !pk.includes(pkg)) setPkg(pk[0]);
+  };
   const [path, setPath] = useState("");
   const [found, setFound] = useState<string[]>([]);
   const [comps, setComps] = useState<KiComponent[] | null>(null);
@@ -17,6 +30,7 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [onlyLogic, setOnlyLogic] = useState(true);
+  const [browsing, setBrowsing] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,10 +43,10 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const load = async () => {
+  const load = async (which = path) => {
     setLoading(true); setError(""); setComps(null); setPreview(null);
     try {
-      const r = await api.kicadComponents(path.trim().replace(/^"|"$/g, ""));
+      const r = await api.kicadComponents(which.trim().replace(/^"|"$/g, ""));
       setPath(r.path);
       setComps(r.components);
       // Tick every logic chip the library knows (the pin count then shows
@@ -47,6 +61,18 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Browse…: the desktop app's own file dialog, else the in-app browser.
+  const browse = async () => {
+    const native = api.nativeKicadPicker();
+    if (!native) { setBrowsing(true); return; }
+    try {
+      const p = await native(path.trim());
+      if (p) { setPath(p); load(p); }
+    } catch (e) {
+      setError(String(e));
     }
   };
 
@@ -72,12 +98,12 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
     if (!refs.length) { setPreview(null); return; }
     let stale = false;
     const t = setTimeout(() => {
-      api.kicadPreview(path, refs, overrides, design, variants)
+      api.kicadPreview(path, refs, overrides, target, variants)
         .then((p) => { if (!stale) { setPreview(p); setError(""); } })
         .catch((e) => { if (!stale) { setPreview(null); setError(String(e.message ?? e)); } });
     }, 200);
     return () => { stale = true; clearTimeout(t); };
-  }, [comps, refs, overrides, path, design, variants]);
+  }, [comps, refs, overrides, path, target, variants]);
 
   const toggle = (ref: string) => setPicked((s) => {
     const n = new Set(s);
@@ -101,19 +127,41 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
           <input className="grow mono" list="kicad-files" value={path} aria-label="Schematic path"
                  placeholder="C:\path\to\board.kicad_sch"
                  onChange={(e) => setPath(e.target.value)}
-                 onKeyDown={(e) => { if (e.key === "Enter") load(); }} />
+                 onKeyDown={(e) => { if (e.key === "Enter" && !browsing) load(); }} />
           <datalist id="kicad-files">{found.map((f) => <option key={f} value={f} />)}</datalist>
-          <button className="primary" onClick={load} disabled={!path.trim() || loading}>
+          <button onClick={browse} disabled={loading} title="Choose a .kicad_sch (or .net) file">
+            Browse…
+          </button>
+          <button className="primary" onClick={() => load()} disabled={!path.trim() || loading}>
             {loading ? "Reading…" : "Load"}
           </button>
         </div>
         {!comps && !loading && (
           <p className="muted small">
-            {found.length ? `Found ${found.length} schematic(s) near the project; pick one or paste a path.`
-                          : "Paste the path of a .kicad_sch file (KiCad 7+ must be installed)."}
+            {found.length ? `Found ${found.length} schematic(s) near the project: pick one, browse, or paste a path.`
+                          : "Browse to a .kicad_sch file or paste its path (KiCad 7+ must be installed)."}
           </p>
         )}
+        <div className="row small import-target">
+          <label htmlFor="import-device">Target</label>
+          <select id="import-device" aria-label="Target device" value={device}
+                  onChange={(e) => pickDevice(e.target.value)}>
+            {(deviceNames.includes(device) ? deviceNames : [device, ...deviceNames]).map((d) =>
+              <option key={d} value={d}>{deviceLabel(d, devices.find((x) => x.device === d))}</option>)}
+          </select>
+          <select aria-label="Target package" value={pkg} onChange={(e) => setPkg(e.target.value)}>
+            {(packages.includes(pkg) ? packages : [pkg, ...packages]).map((p) =>
+              <option key={p} value={p}>{p}</option>)}
+          </select>
+          {(device !== design.device || pkg !== design.package) &&
+            <span className="muted">(the project is on {design.device} {design.package})</span>}
+        </div>
         {error && <div className="msg error small">{error}</div>}
+        {browsing && (
+          <FileBrowser start={path} title="Choose a KiCad schematic"
+                       onPick={(p) => { setBrowsing(false); setPath(p); load(p); }}
+                       onCancel={() => setBrowsing(false)} />
+        )}
 
         {comps && (
           <>
@@ -124,7 +172,7 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
               <span>{refs.length} selected</span>
               {preview && (
                 <span className={`pincount${over ? " over" : ""}`} data-testid="import-pins">
-                  {preview.pins}{preview.capacity !== null ? ` / ${preview.capacity}` : ""} pins on {design.device} {design.package}
+                  {preview.pins}{preview.capacity !== null ? ` / ${preview.capacity}` : ""} pins on {device} {pkg}
                 </span>
               )}
             </div>
@@ -188,8 +236,8 @@ export function ImportDialog({ design, parts, onImport, onClose }: {
         )}
 
         <div className="modal-foot">
-          <span className="muted small">Replaces the chips and nets in this project (Undo restores them).
-            Name and device are kept.</span>
+          <span className="muted small">Replaces the chips and nets in this project (Undo restores them)
+            and sets the target to {device} {pkg}. The name is kept.</span>
           <span className="spacer" />
           <button onClick={onClose}>Cancel</button>
           <button className="primary" disabled={!preview || !refs.length}

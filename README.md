@@ -229,14 +229,58 @@ On the command line, `build` makes every variant (or `--variant NAME`), and
 
 ## GreenPAK (design and check)
 
-The Renesas SLG46826 and SLG46620 (TSSOP-20 and STQFN-20) are supported as
-design-and-check targets: pin assignment knows each pin's limits (output-only
-pins, pins without an output enable, the SLG46826's I2C pins), and the report
+Renesas GreenPAKs are supported as design-and-check targets:
+
+| Part | Package | I/O | Logic cells | Notes |
+|---|---|---|---|---|
+| SLG46826, SLG46824 | STQFN-20, TSSOP-20 | 15 | 19 | in-system reprogrammable over I2C |
+| SLG46620 | STQFN-20, TSSOP-20 | 17 + 1 input | 40 | one-time programmable |
+| SLG46621 | STQFN-20 | 16 + 1 input | 40 | SLG46620 with a second supply (VDD2) |
+| SLG46531 | STQFN-20 | 15 + 3 inputs | 17 | in-system programmable |
+| SLG46533 | STQFN-20 | 15 + 3 inputs | 25 | 15 DFF-capable cells |
+| SLG46537, SLG46538 | STQFN-20 | 15 (14) + 3 inputs | 17 | the 46538 has VDD2 on pin 14 |
+| SLG46140 | STQFN-14 | 11 + 1 input | 16 | |
+| SLG46110 | STQFN-12 | 7 + 1 input | 10 | |
+| SLG46108 | STQFN-8 | 5 + 1 input | 10 | |
+
+Pin tables and logic cells come from the Renesas datasheets. Pin assignment
+knows each pin's limits (output-only pins, pins without an output enable,
+I2C pins: on the SLG4653x their outputs are open-drain only, so they're used
+as inputs). The MSTQFN-22 versions of the SLG4653x aren't included. The report
 panel maps the logic onto the part's LUTs and DFFs with Yosys and shows
-whether it fits. There is no open tool chain that programs GreenPAKs, so
-**LUT sheet…** prints every LUT's truth table, the DFFs and the pins, to
-enter in Renesas Go Configure. `cpldglue greenpak project.cg -o out` does the
-same from the command line.
+whether it fits. **LUT sheet…** prints every LUT's truth table, the DFFs and
+the pins, to enter in Renesas Go Configure. `cpldglue greenpak project.cg -o out`
+does the same from the command line.
+
+### SLG46826 / SLG46824 bitstreams
+
+For the SLG46826 and SLG46824, cpldglue also places the design in the chip's
+cells and writes the configuration itself, so Go Configure isn't needed. The
+bitstream is decoded and simulated against the design before it's offered;
+the panel shows the result and the placement. You get:
+
+- `<name>_programmer.ino`: an Arduino sketch that programs the chip over I2C
+  (SDA/SCL with 4.7k pull-ups, GND; 115200 baud monitor). It reads the chip
+  first and keeps every bit the design doesn't set (the I2C address, the
+  protection bits, the factory trim), erases and writes pages 0–13 as the
+  Renesas in-system programming guide describes, then reads back and compares.
+- `<name>.txt`: one line per NVM bit, as Go Configure's NVM export.
+- `<name>.bin` and `<name>_mask.bin`: the 256-byte image and which bits it defines.
+
+What's used: all 19 LUT/DFF cells. Flip-flops and latches go in the 2-bit,
+3-bit and multi-function cells; one with both preset and clear goes in the
+4-bit cell. The I/O pins are used too: open-collector outputs use the
+open-drain output mode, and unused pins get a 1M pull-down, as Go Configure
+does. The counters, delays, comparators and oscillators aren't used.
+
+How it's checked: the register map comes from the datasheet (Table 59, the
+matrix tables and the block diagrams). It's checked against
+[GreenHAL](https://github.com/Bread80/GreenHAL), a Go Configure project with
+a hardware test log (in `tests/reference/greenpak`). The tests decode its
+NVM image with cpldglue's register map, simulate it, and replay the log;
+every line matches. That covers the matrix numbering, the LUT input order,
+the DFF settings, the multi-function cells' DFF mode and the pins. Bitstreams
+cpldglue writes haven't been programmed into a chip yet.
 
 ## GAL16V8 / GAL20V8 / GAL20RA10 / GAL22V10
 
@@ -335,7 +379,7 @@ The whole ATF15xx family, in every package Microchip lists:
 
 Also, see above: the MAX 7000S EPM7032S / EPM7064S / EPM7128S, the GAL16V8
 (DIP20, PLCC20), GAL20V8, GAL20RA10 and GAL22V10 (DIP24, PLCC28), the iCE40HX1K /
-HX4K (TQ144) and iCE40UP5K (SG48) FPGAs, and the GreenPAK SLG46826 / SLG46620.
+HX4K (TQ144) and iCE40UP5K (SG48) FPGAs, and eleven GreenPAKs.
 
 `python -m cpldglue devices` lists the I/O count of each. The pin tables
 (I/O, JTAG, the four dedicated inputs, VCC/GND and no-connects) are

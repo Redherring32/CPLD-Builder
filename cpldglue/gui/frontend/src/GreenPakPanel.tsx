@@ -31,6 +31,17 @@ export function GreenPakPanel({ design, device, gen }: {
     return () => { stale = true; clearTimeout(t); };
   }, [design, gen?.ok, gen?.verilog]);
 
+  const download = (name: string, content: string | Uint8Array, type: string) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([content as BlobPart], { type }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const b64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  const bits = res?.bitstream;
+  const base = `${design.name}-${design.device}`;
+
   const save = () => {
     if (!res?.sheet) return;
     const a = document.createElement("a");
@@ -83,6 +94,33 @@ export function GreenPakPanel({ design, device, gen }: {
           </div>
           {res.unplaced.map((u) => <div key={u} className="msg error small">No room for {u}</div>)}
           {res.notes.map((n) => <div key={n} className="muted small">{n}</div>)}
+          {bits && (
+            <div className="gp-bits small" data-testid="gp-bitstream">
+              <b>Bitstream</b>{" "}
+              {bits.ok
+                ? <span className="gp-ok">✓ {bits.check}</span>
+                : <span className="mcbar-over">{bits.errors.join("; ") || bits.check}</span>}
+              {bits.files && bits.ok && (
+                <div className="gp-actions">
+                  <button onClick={() => download(`${base}_programmer.ino`, bits.files!.ino, "text/plain")}
+                          title="Arduino sketch that programs the chip over I2C (keeps its I2C address and factory data)">
+                    Arduino programmer…
+                  </button>
+                  <button onClick={() => download(`${base}.txt`, bits.files!.txt, "text/plain")}
+                          title="One line per NVM bit (index, value), as GreenPAK Designer's bit list">
+                    Bit list (.txt)
+                  </button>
+                  <button onClick={() => download(`${base}.bin`, b64(bits.files!.bin), "application/octet-stream")}
+                          title="The 256-byte configuration image; the _mask.bin marks the bits this design defines">
+                    Image (.bin)
+                  </button>
+                  <button onClick={() => download(`${base}_mask.bin`, b64(bits.files!.mask), "application/octet-stream")}>
+                    Mask
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="gp-actions">
             <button onClick={() => setSheet(true)}
                     title="Every LUT's truth table, the DFFs and the pins, to enter in Renesas Go Configure">

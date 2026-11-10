@@ -101,13 +101,17 @@ DEVICES: Dict[str, Device] = _build()
 
 # ---- GreenPAK ---------------------------------------------------------------
 def _gp_package(name: str, pins: Dict[int, str], out_only, no_oe, reserved,
-                sides, footprint) -> Package:
-    io = sorted(n for n, nm in pins.items() if nm.startswith(("IO", "PIN")))
+                sides, footprint, input_only=()) -> Package:
+    """input_only: I/O names used only as inputs here (e.g. I2C pins whose
+    outputs are open-drain only)."""
+    io = sorted(n for n, nm in pins.items()
+                if nm.startswith(("IO", "PIN")) and nm not in input_only)
     power = {n: ("GND" if nm == "GND" else "VCC") for n, nm in pins.items()
              if nm in ("VDD", "VDD2", "GND")}
-    inputs = {nm: n for n, nm in pins.items() if nm == "GPI"}
+    inputs = {nm: n for n, nm in pins.items() if nm == "GPI" or nm in input_only}
+    nc = sorted(n for n, nm in pins.items() if nm == "NC")
     by_name = {nm: n for n, nm in pins.items()}
-    return Package(name, io, inputs, {}, power, len(pins), [],
+    return Package(name, io, inputs, {}, power, len(pins), nc,
                    [by_name[x] for x in out_only], [by_name[x] for x in no_oe],
                    {r: by_name[r] for r in reserved}, dict(pins), "qfn", sides, footprint)
 
@@ -159,6 +163,110 @@ DEVICES["SLG46620"] = Device(
     # generator), 12 dedicated DFF/latches, 2 inverters.
     resources={"lut2": 8, "lut3": 16, "lut4": 2, "dff": 12, "inv": 2},
     note="one-time programmable (emulate on the dev board first)")
+
+# ---- more GreenPAKs (pin tables and macrocells from the Renesas datasheets) -------
+# SLG46824 (rev 3.20): the SLG46826 die without the EEPROM emulation; same
+# pins in both packages, same logic cells.
+DEVICES["SLG46824"] = Device(
+    "SLG46824", 0, {
+        "STQFN20": _gp_package("STQFN20", _SLG46826_STQFN, sides=(6, 4, 6, 4),
+                               footprint=_STQFN, **_SLG46826),
+        "TSSOP20": _gp_package("TSSOP20", _SLG46826_TSSOP, sides=(10, 0, 10, 0),
+                               footprint=_TSSOP, **_SLG46826),
+    }, 5.0, kind="greenpak", supply="2.5-5 V (VDD2 1.8-5 V)",
+    resources={"lut2_dff": 3, "lut2": 1, "lut3_dff": 13, "lut3": 1, "lut4_dff": 1},
+    note="in-system reprogrammable over I2C")
+
+# SLG46621 (rev 1.42): the SLG46620 with a second supply on pin 14 (for pins
+# 12-20), so one GPIO fewer.
+_SLG46621_PINS = {**_SLG46620_PINS, 14: "VDD2"}
+DEVICES["SLG46621"] = Device(
+    "SLG46621", 0, {
+        "STQFN20": _gp_package("STQFN20", _SLG46621_PINS, sides=(6, 4, 6, 4),
+                               footprint=_STQFN, **_SLG46620),
+    }, 5.0, kind="greenpak", supply="1.8-5 V (VDD2 1.8-5 V, at most VDD)",
+    resources={"lut2": 8, "lut3": 16, "lut4": 2, "dff": 12, "inv": 2},
+    note="one-time programmable; dual supply (pins 12-20 on VDD2)")
+
+# SLG46140 (14-pin STQFN, 1.6 x 2.0 mm): pin 2 input only; pins 6, 10, 11
+# have no output enable. 4x 2-bit + 4x 3-bit LUT, 2x 2-bit LUT/DFF,
+# 2x 3-bit LUT/DFF, 2x 3-bit LUT (pipe delay / counter), 2x 4-bit LUT
+# (counter / pattern generator).
+DEVICES["SLG46140"] = Device(
+    "SLG46140", 0, {
+        "STQFN14": _gp_package("STQFN14", {1: "VDD", 2: "GPI", 8: "GND",
+                                           **{n: f"PIN{n}" for n in (3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14)}},
+                               out_only=[], no_oe=["PIN6", "PIN10", "PIN11"], reserved=[],
+                               sides=(5, 2, 5, 2), footprint=""),
+    }, 5.0, kind="greenpak", supply="1.8-5 V",
+    resources={"lut2": 4, "lut3": 6, "lut4": 2, "lut2_dff": 2, "lut3_dff": 2},
+    note="one-time programmable (emulate on the dev board first)")
+
+# SLG46108 (8-pin STQFN, 1.0 x 1.2 mm) and SLG46110 (12-pin STQFN): the same
+# logic: 2x 2-bit + 2x 3-bit LUT, 2x 2-bit LUT/DFF, 2x 3-bit LUT/DFF, a 3-bit
+# LUT (pipe delay) and a 4-bit LUT (counter). Only some pins have an output enable.
+_SMALL = {"lut2": 2, "lut3": 3, "lut4": 1, "lut2_dff": 2, "lut3_dff": 2}
+DEVICES["SLG46108"] = Device(
+    "SLG46108", 0, {
+        "STQFN8": _gp_package("STQFN8", {1: "VDD", 2: "GPI", 3: "PIN3", 4: "PIN4", 5: "GND",
+                                         6: "PIN6", 7: "PIN7", 8: "PIN8"},
+                              out_only=[], no_oe=["PIN3", "PIN6", "PIN7"], reserved=[],
+                              sides=(3, 1, 3, 1), footprint=""),
+    }, 5.0, kind="greenpak", supply="1.8-5 V", resources=dict(_SMALL),
+    note="one-time programmable; 5 I/O + 1 input")
+DEVICES["SLG46110"] = Device(
+    "SLG46110", 0, {
+        "STQFN12": _gp_package("STQFN12", {1: "VDD", 2: "GPI", 3: "PIN3", 4: "PIN4", 5: "NC",
+                                           6: "PIN6", 7: "GND", 8: "PIN8", 9: "PIN9", 10: "PIN10",
+                                           11: "NC", 12: "PIN12"},
+                               out_only=[], no_oe=["PIN3", "PIN4", "PIN8", "PIN9", "PIN12"],
+                               reserved=[], sides=(4, 2, 4, 2), footprint=""),
+    }, 5.0, kind="greenpak", supply="1.8-5 V", resources=dict(_SMALL),
+    note="one-time programmable; 7 I/O + 1 input")
+
+# SLG4653x family (STQFN-20, 7-3-7-3 pins per side): pin 2 input only; the
+# I2C pins (8 SCL, 9 SDA) have open-drain-only outputs, so they're used as
+# inputs here. The MSTQFN-22 package (with centre pads) isn't drawn.
+def _slg4653x(vdd2: bool = False) -> Dict[int, str]:
+    pins = {1: "VDD", 2: "GPI", 11: "GND",
+            **{n: f"PIN{n}" for n in list(range(3, 11)) + list(range(12, 21))}}
+    pins[8], pins[9] = "PIN8/SCL", "PIN9/SDA"
+    if vdd2:
+        pins[14] = "VDD2"
+    return pins
+
+
+_SLG4653X_OPTS = dict(out_only=[], reserved=[], input_only=["PIN8/SCL", "PIN9/SDA"],
+                      sides=(7, 3, 7, 3), footprint=_STQFN)
+_SLG4653X = {"lut2_dff": 3, "lut3_dff": 5, "lut3": 6, "lut2": 1, "lut4": 2}
+# SLG46531 (pin list from the datasheet's I/O chapter): OE on 3, 5, 7, 10,
+# 13, 14, 16, 18, 19.
+DEVICES["SLG46531"] = Device(
+    "SLG46531", 0, {"STQFN20": _gp_package(
+        "STQFN20", _slg4653x(), no_oe=[f"PIN{n}" for n in (4, 6, 12, 15, 17, 20)],
+        **_SLG4653X_OPTS)},
+    5.0, kind="greenpak", supply="1.8-5 V", resources=dict(_SLG4653X),
+    note="in-system programmable over I2C; asynchronous state machine")
+# SLG46533 / SLG46537 / SLG46538 (STQFN-20 tables): OE on IO1, 3, 5, 8, 10,
+# 11, 13, 15, 16 = pins 3, 5, 7, 10, 13, 14, 16, 18, 19.
+_NO_OE_653X = [f"PIN{n}" for n in (4, 6, 12, 15, 17, 20)]
+DEVICES["SLG46533"] = Device(
+    "SLG46533", 0, {"STQFN20": _gp_package("STQFN20", _slg4653x(), no_oe=_NO_OE_653X,
+                                           **_SLG4653X_OPTS)},
+    5.0, kind="greenpak", supply="1.8-5 V",
+    resources={"lut2_dff": 3, "lut3_dff": 12, "lut3": 6, "lut2": 1, "lut4": 3},
+    note="one-time programmable; the most DFFs of these (15)")
+DEVICES["SLG46537"] = Device(
+    "SLG46537", 0, {"STQFN20": _gp_package("STQFN20", _slg4653x(), no_oe=_NO_OE_653X,
+                                           **_SLG4653X_OPTS)},
+    5.0, kind="greenpak", supply="1.8-5 V", resources=dict(_SLG4653X),
+    note="one-time programmable; asynchronous state machine")
+DEVICES["SLG46538"] = Device(
+    "SLG46538", 0, {"STQFN20": _gp_package("STQFN20", _slg4653x(vdd2=True), no_oe=_NO_OE_653X,
+                                           **_SLG4653X_OPTS)},
+    5.0, kind="greenpak", supply="1.8-5 V (VDD2 1.8-5 V, at most VDD)",
+    resources=dict(_SLG4653X),
+    note="one-time programmable; dual supply; asynchronous state machine")
 
 
 # ---- GAL16V8 / GAL22V10 ------------------------------------------------------------

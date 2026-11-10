@@ -13,6 +13,7 @@ ROOT = Path(SPECPATH).parent
 datas = [
     (str(ROOT / "cpldglue" / "gui" / "static"), "cpldglue/gui/static"),
     (str(ROOT / "cpldglue" / "hdl"), "cpldglue/hdl"),
+    (str(ROOT / "cpldglue" / "data"), "cpldglue/data"),     # GreenPAK register maps
     (str(ROOT / "examples"), "examples"),
     (str(ROOT / "packaging" / "icon.png"), "."),
 ]

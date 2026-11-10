@@ -176,6 +176,17 @@ def main(argv=None) -> int:
             print(f"note: {n}")
         out = a.out / f"{generate.sanitize(d.name)}-greenpak.html"
         out.write_text(greenpak.sheet_html(d, r, m), encoding="utf-8")
+        from . import gpbits
+        if m.fit.ok and greenpak.devices.DEVICES[d.device.upper()].name in gpbits.SUPPORTED:
+            b = gpbits.build(d, r, m, a.out / "greenpak-work" / "bits")
+            for e in b.errors:
+                print(f"bitstream: {e}")
+            if b.check:
+                print(b.check)
+            if b.bits and not b.errors:
+                files = gpbits.write_files(b, d, a.out, generate.sanitize(d.name))
+                print("Wrote " + ", ".join(f.name for f in files)
+                      + " (NVM bits; Arduino I2C programmer; 256-byte image and mask)")
         print(f"Wrote {out}")
         return 0 if m.fit.ok else 1
     if a.cmd == "kicad-symbol":

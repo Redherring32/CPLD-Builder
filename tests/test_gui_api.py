@@ -338,6 +338,37 @@ class TestServer(unittest.TestCase):
             urllib.request.urlopen(req)
         self.assertEqual(cm.exception.code, 403)
 
+    def test_examples_are_listed(self):
+        _, _, body = self.get("/api/examples")
+        ex = json.loads(body)["examples"]
+        self.assertEqual([x["id"] for x in ex], ["tinytendo"])
+        self.assertTrue((ROOT / "examples" / "tinytendo.cg").exists())
+
+    def test_file_browser_lists_kicad_files(self):
+        import tempfile
+        root = Path(tempfile.mkdtemp(prefix="fbtest_"))
+        (root / "sub").mkdir()
+        (root / ".hidden").mkdir()
+        (root / "board-backups").mkdir()
+        for n in ("b.kicad_sch", "A.kicad_sch", "nets.net", "board.kicad_pcb", "notes.txt"):
+            (root / n).write_text("")
+        r = self.post("/api/fs/list", {"path": str(root)})
+        self.assertEqual(Path(r["path"]), root.resolve())
+        self.assertEqual(r["dirs"], ["sub"])                        # no hidden / backup folders
+        self.assertEqual(r["files"], ["A.kicad_sch", "b.kicad_sch", "nets.net"])
+        self.assertEqual(Path(r["parent"]), root.resolve().parent)
+        # a file path opens its folder; a missing one, the nearest real folder
+        self.assertEqual(Path(self.post("/api/fs/list", {"path": str(root / "A.kicad_sch")})["path"]),
+                         root.resolve())
+        self.assertEqual(Path(self.post("/api/fs/list", {"path": str(root / "no" / "x")})["path"]),
+                         root.resolve())
+        self.assertTrue(r["roots"])
+        # listing goes through the write check (our header), like other POSTs
+        req = urllib.request.Request(self.base + "/api/fs/list", b'{"path": ""}',
+                                     {"Content-Type": "text/plain"})
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(req)
+
     def test_deps_status(self):
         _, _, body = self.get("/api/deps")
         ids = [d["id"] for d in json.loads(body)["deps"]]

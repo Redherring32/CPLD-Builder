@@ -467,3 +467,27 @@ table.keys td:first-child { white-space: nowrap; color: var(--accent); }
 .symbol-art .sym text.overbar { text-decoration: overline; }
 .symbol-art .unused { opacity: .35; }
 .chip.symbol .pinnum { background: transparent; }
+
+/* In-app file browser (plain-browser editor) */
+.modal-back.fb-back { z-index: 60; }
+.modal.fb { width: min(640px, 94vw); }
+.fb-roots { flex-wrap: wrap; gap: 8px; }
+.fb-list { list-style: none; margin: 6px 0; padding: 0; height: min(52vh, 420px); overflow: auto;
+  border: 1px solid var(--line); border-radius: 4px; }
+.fb-list li { padding: 4px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fb-list li:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.fb-list li.selected { background: var(--accent); color: #fff; }
+.fb-list li.fb-empty { cursor: default; }
+.fb-icon { display: inline-block; width: 22px; }
+
+.import-target { align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Dragging pin labels on the pinout drawing */
+.pin .plabel.grab { pointer-events: auto; cursor: grab; }
+.pin.d-input rect, .pin.d-output rect, .pin.d-inout rect { cursor: grab; }
+.pin.dragging .plabel { opacity: .35; }
+.pin.nodrop rect { stroke: var(--error); stroke-width: 2; }
+.pin-ghost { position: fixed; pointer-events: none; z-index: 70; padding: 1px 6px; border-radius: 3px;
+  background: var(--accent); color: #fff; font-size: 12px; white-space: nowrap; }
+
+.gp-bits { margin: 4px 0; }

@@ -67,3 +67,42 @@ describe("placePin", () => {
     expect(placePin("PQFP160", 160, 160)).toEqual({ side: "top", idx: 0 });
   });
 });
+
+import { moveSignal } from "./pinMove";
+import type { GenPort } from "./types";
+
+describe("moving signals between pins", () => {
+  const ports: GenPort[] = [
+    { name: "A", direction: "input", net: "A", pin: 4 },
+    { name: "Y", direction: "output", net: "Y", pin: 5 },
+    { name: "B", direction: "input", net: "B", pin: null },
+  ];
+  const inputOnly = new Set([2]);
+  const problem = (pin: number, s: string) =>
+    inputOnly.has(pin) && ports.find((p) => p.name === s)!.direction !== "input"
+      ? `Pin ${pin} is input-only` : pin === 10 ? "Pin 10 is GND" : null;
+
+  it("puts a signal on a free pin and locks it", () => {
+    expect(moveSignal({}, ports, "A", 8, problem)).toEqual({ locks: { A: 8 } });
+  });
+  it("swaps with the signal already on the pin, locking both", () => {
+    expect(moveSignal({ Z: 9 }, ports, "A", 5, problem))
+      .toEqual({ locks: { Z: 9, A: 5, Y: 4 }, swapped: "Y" });
+  });
+  it("refuses pins the signal can't use", () => {
+    expect(moveSignal({}, ports, "Y", 2, problem)).toEqual({ error: "Pin 2 is input-only" });
+    expect(moveSignal({}, ports, "A", 10, problem)).toEqual({ error: "Pin 10 is GND" });
+  });
+  it("refuses a swap the other signal can't take", () => {
+    inputOnly.add(4);
+    const r = moveSignal({}, ports, "A", 5, problem);
+    inputOnly.delete(4);
+    expect(r).toEqual({ error: "Can't swap with Y: Pin 4 is input-only" });
+  });
+  it("an unplaced signal takes the pin and the other is placed again", () => {
+    expect(moveSignal({ Y: 5 }, ports, "B", 5, problem)).toEqual({ locks: { B: 5 } });
+  });
+  it("dropping on its own pin just locks it", () => {
+    expect(moveSignal({}, ports, "Y", 5, problem)).toEqual({ locks: { Y: 5 } });
+  });
+});

@@ -18,6 +18,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { NODE_W, findFreeSpot, placeChips } from "./layout";
 import { PinoutView } from "./PinoutView";
 import { ImportDialog } from "./ImportDialog";
+import { deviceLabel } from "./deviceLabel";
 import { BuildDialog } from "./BuildDialog";
 import { SetupDialog } from "./SetupDialog";
 import { VariantsDialog } from "./VariantsDialog";
@@ -170,6 +171,19 @@ function Editor() {
       baseMtime.current = -1;
       await poll(true);
     } catch (e) { setFlash(`Could not open: ${e instanceof Error ? e.message : e}`); }
+  }, [poll]);
+
+  const [examples, setExamples] = useState<api.ExampleInfo[]>([]);
+  useEffect(() => { api.getExamples().then(setExamples).catch(() => {}); }, []);
+  /** Open an example: the server copies it next to the user's projects
+   *  (once), so editing and saving it never touches the bundled original. */
+  const openExample = useCallback(async (id: string) => {
+    if (dirtyRef.current && !window.confirm("Discard unsaved changes to this project?")) return;
+    try {
+      await api.openExample(id);
+      baseMtime.current = -1;
+      await poll(true);
+    } catch (e) { setFlash(`Could not open the example: ${e instanceof Error ? e.message : e}`); }
   }, [poll]);
 
   const saveAs = useCallback(async () => {
@@ -422,13 +436,18 @@ function Editor() {
         <strong className="brand">cpldglue</strong>
         <button onClick={async () => openPath(await api.pickPath("open", path))}
                 title="Open another project, or type a new file name to start one">Open…</button>
-        {recent.length > 0 && (
-          <select aria-label="Recent projects" value="" className="recent"
-                  onChange={(e) => openPath(e.target.value || null)}>
-            <option value="">Recent</option>
-            {recent.map((r) => <option key={r} value={r}>{r.split(/[\\/]/).pop()} — {r}</option>)}
-          </select>
-        )}
+        <select aria-label="Recent projects and examples" value="" className="recent"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v.startsWith("example:")) openExample(v.slice(8));
+                  else openPath(v || null);
+                }}>
+          <option value="">Recent</option>
+          {recent.map((r) => <option key={r} value={r}>{r.split(/[\\/]/).pop()} — {r}</option>)}
+          <optgroup label="Examples">
+            {examples.map((x) => <option key={x.id} value={`example:${x.id}`}>{x.title}</option>)}
+          </optgroup>
+        </select>
         <button onClick={saveAs} title="Save the project under a new name">Save as…</button>
         <NameField value={design.name}
                    onCommit={(v) => apply((d) => m.setDesignField(d, "name", v))} />
@@ -444,13 +463,7 @@ function Editor() {
                 }}>
           {(deviceNames.includes(design.device) ? deviceNames : [design.device, ...deviceNames]).map((d) => {
             const info = devices.find((x) => x.device === d);
-            return <option key={d} value={d}>
-              {!info ? d : info.kind === "greenpak" ? `${d} · GreenPAK`
-                : info.kind === "gal" ? `${d} · GAL · ${info.macrocells} OLMC`
-                : info.kind === "ice40" ? `${d} · FPGA · ${info.resources?.lut ?? "?"} LUT · 3.3 V`
-                : info.kind === "max7000" ? `${d} · ${info.macrocells} MC · MAX 7000S`
-                : `${d} · ${info.macrocells} MC${info.vcc !== undefined && info.vcc < 5 ? " · 3.3 V" : ""}`}
-            </option>;
+            return <option key={d} value={d}>{deviceLabel(d, info)}</option>;
           })}
         </select>
         <select aria-label="Package" value={design.package}
@@ -623,7 +636,7 @@ function Editor() {
         </div>
       )}
       {dialog === "import" && (
-        <ImportDialog design={design} parts={partList} onImport={importDesign}
+        <ImportDialog design={design} parts={partList} devices={devices} onImport={importDesign}
                       onClose={() => setDialog(null)} />
       )}
       {dialog === "setup" && <SetupDialog onClose={() => setDialog(null)} />}

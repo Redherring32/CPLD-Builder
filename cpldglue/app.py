@@ -36,18 +36,39 @@ def resource_dir() -> Path:
     return Path(base) if base else Path(__file__).resolve().parent.parent
 
 
-def default_project() -> Path:
-    recent = deps.recent_projects()
-    if recent:
-        return Path(recent[0])
+def projects_folder() -> Path:
     docs = Path.home() / "Documents"
     folder = (docs if docs.is_dir() else Path.home()) / "CPLD-Builder"
     folder.mkdir(parents=True, exist_ok=True)
-    target = folder / "tinytendo.cg"
-    example = resource_dir() / "examples" / "tinytendo.cg"
-    if not target.exists() and example.exists():
-        shutil.copyfile(example, target)
-    return target if target.exists() else folder / "untitled.cg"
+    return folder
+
+
+def default_project() -> Path:
+    """A new, empty project (nothing is written until it's saved). Recent
+    projects and the bundled examples are a click away in the editor."""
+    folder = projects_folder()
+    target, n = folder / "untitled.cg", 2
+    while target.exists():
+        target, n = folder / f"untitled-{n}.cg", n + 1
+    return target
+
+
+EXAMPLES = {"tinytendo": ("TinyTendo glue logic (example)", "tinytendo.cg")}
+
+
+def example_copy(example_id: str) -> Path:
+    """A copy of a bundled example in the user's projects folder (made once,
+    so the user's edits to it are kept), ready to open."""
+    if example_id not in EXAMPLES:
+        raise ValueError(f"no example {example_id!r}")
+    _, filename = EXAMPLES[example_id]
+    src = resource_dir() / "examples" / filename
+    folder = projects_folder() / "examples"
+    folder.mkdir(parents=True, exist_ok=True)
+    dst = folder / filename
+    if not dst.exists():
+        shutil.copyfile(src, dst)
+    return dst
 
 
 class Bridge:
@@ -61,6 +82,10 @@ class Bridge:
         cur = Path(current) if current else None
         folder = str(cur.parent) if cur and cur.parent.is_dir() else str(Path.home())
         types = ("CPLD-Builder projects (*.cg;*.json)", "All files (*.*)")
+        if mode == "kicad":
+            types = ("KiCad schematics (*.kicad_sch)", "KiCad netlists (*.net)", "All files (*.*)")
+            if cur and cur.is_dir():
+                folder = str(cur)
         dialog = getattr(webview, "FileDialog", None)
         if mode == "save":
             kind = dialog.SAVE if dialog else webview.SAVE_DIALOG
@@ -134,7 +159,8 @@ def main(argv=None) -> int:
     from .gui.server import bind, make_handler
 
     project = api.Project(a.project or default_project())
-    deps.remember_project(project.path)
+    if project.path.exists():
+        deps.remember_project(project.path)
     httpd = bind(make_handler(project, api.Builder(None, None)), a.port)
     url = f"http://127.0.0.1:{httpd.server_address[1]}/"
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

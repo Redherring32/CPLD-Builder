@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import type { DragEvent } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { DragEvent, PointerEvent as RPointerEvent } from "react";
+import { moveSignal } from "./pinMove";
 import type { Design, DeviceInfo, GenPort, GenResult } from "./types";
 import * as api from "./api";
 
@@ -136,15 +137,59 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
     return null;
   };
 
+  /** Put a signal on a pin: a free pin takes it, a used one swaps. */
+  const place = (signal: string, num: number) => {
+    const r = moveSignal(design.pin_locks, ports, signal, num,
+                         (n, s) => canDrop(pins[n - 1], s));
+    if ("error" in r) { onFlash(r.error); return; }
+    onSetLocks(r.locks);
+    if (r.swapped) onFlash(`Swapped ${signal} and ${r.swapped} (both locked)`);
+  };
+
   const onDrop = (e: DragEvent, pin: PinInfo) => {
     e.preventDefault();
     setDropTarget(null);
     const signal = e.dataTransfer.getData(SIGNAL_MIME);
     if (!signal) return;
-    const why = canDrop(pin, signal);
-    if (why) onFlash(why);
-    else onLock(signal, pin.num);
+    place(signal, pin.num);
   };
+
+  // Dragging a signal's label on the drawing to another pin (pointer events:
+  // SVG elements can't use HTML drag and drop). A short press is a click.
+  const [drag, setDrag] = useState<{ signal: string; from: number; x: number; y: number;
+                                     moved: boolean } | null>(null);
+  const pinAt = (x: number, y: number): number | null => {
+    const el = document.elementFromPoint(x, y)?.closest("[data-pin]");
+    return el ? Number(el.getAttribute("data-pin")) : null;
+  };
+  const startDrag = (e: RPointerEvent, p: PinInfo) => {
+    if (!p.port || e.button !== 0) return;
+    // The drag lives in this closure (events can arrive before React renders).
+    const cur = { signal: p.port.name, from: p.num, x: e.clientX, y: e.clientY, moved: false };
+    const sx = e.clientX, sy = e.clientY;
+    const move = (ev: PointerEvent) => {
+      cur.x = ev.clientX; cur.y = ev.clientY;
+      cur.moved = cur.moved || Math.hypot(ev.clientX - sx, ev.clientY - sy) > 5;
+      if (cur.moved) {
+        setDrag({ ...cur });
+        setDropTarget(pinAt(ev.clientX, ev.clientY));
+      }
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDrag(null);
+      setDropTarget(null);
+      const moved = cur.moved || Math.hypot(ev.clientX - sx, ev.clientY - sy) > 5;
+      if (!moved) return;
+      suppressClick.current = true;
+      const to = pinAt(ev.clientX, ev.clientY);
+      if (to != null && to !== cur.from) place(cur.signal, to);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const suppressClick = useRef(false);
 
   if (!device) {
     return <div className="pinout empty muted">
@@ -173,8 +218,11 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
                 className="pkg-body" />
           <circle cx={plcc ? W / 2 : X0 + 22}
                   cy={Y0 + 22} r={7} className="pkg-dot" />
-          <text x={W / 2} y={H / 2 - 8} className="pkg-name">{design.device}</text>
-          <text x={W / 2} y={H / 2 + 16} className="pkg-sub">{design.package}</text>
+          {/* small packages (GreenPAK STQFN-8/12/14): smaller name so it fits the body */}
+          <text x={W / 2} y={H / 2 - 8} className="pkg-name"
+                style={device.pin_count <= 14 ? { fontSize: 13 } : undefined}>{design.device}</text>
+          <text x={W / 2} y={H / 2 + 16} className="pkg-sub"
+                style={device.pin_count <= 14 ? { fontSize: 10 } : undefined}>{design.package}</text>
           {pins.map((p) => {
             const { side, idx } = placePin(design.package, p.num, device.pin_count, sides);
             const horiz = side === "top" || side === "bottom";
@@ -197,19 +245,23 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
                         : p.type === "nc" ? "NC"
                         : p.type === "jtag" || p.type === "reserved" ? p.role.split(" ")[0] : "";
             const sel = !!p.port && p.port.net === selectedNet;
+            const dragging = !!drag?.moved && drag.from === p.num;
+            const bad = !!drag?.moved && dropTarget === p.num && p.num !== drag.from &&
+                        !!canDrop(p, drag.signal);
             const cls = ["pin", `t-${p.type}`, p.port ? `d-${p.port.direction}` : "free",
-                         p.locked ? "locked" : "", sel ? "sel" : "",
-                         dropTarget === p.num ? "drop" : ""].join(" ");
+                         p.locked ? "locked" : "", sel ? "sel" : "", dragging ? "dragging" : "",
+                         dropTarget === p.num ? (bad ? "nodrop" : "drop") : ""].join(" ");
             return (
               <g key={p.num} className={cls} data-pin={p.num}
                  onMouseEnter={() => setHover(p.num)} onMouseLeave={() => setHover(null)}
+                 onPointerDown={(e) => startDrag(e, p)}
                  onClick={() => {
+                   if (suppressClick.current) { suppressClick.current = false; return; }
                    if (p.port) { onSelectNet(sel ? null : p.port.net); return; }
                    // Free pin + a selected signal: lock the signal here.
                    const s = ports.find((x) => x.net === selectedNet);
                    if (!s || p.type === "power" || p.type === "nc") return;
-                   const why = canDrop(p, s.name);
-                   if (why) onFlash(why); else onLock(s.name, p.num);
+                   place(s.name, p.num);
                  }}
                  onDragOver={(e) => { e.preventDefault(); setDropTarget(p.num); }}
                  onDragLeave={() => setDropTarget(null)}
@@ -219,7 +271,7 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
                 <text x={numX} y={numY} className="pinno"
                       textAnchor={horiz ? "middle" : side === "left" ? "start" : "end"}>{p.num}</text>
                 {label && (
-                  <text x={lx} y={ly} className="plabel" textAnchor={anchor}
+                  <text x={lx} y={ly} className={`plabel${p.port ? " grab" : ""}`} textAnchor={anchor}
                         dominantBaseline="middle" transform={rot}>
                     {p.locked ? "🔒 " : ""}{label}
                   </text>
@@ -228,6 +280,11 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
             );
           })}
         </svg>
+        {drag?.moved && (
+          <div className="pin-ghost mono" style={{ left: drag.x + 12, top: drag.y + 8 }}>
+            {drag.signal}{dropTarget && dropTarget !== drag.from ? ` → ${dropTarget}` : ""}
+          </div>
+        )}
         </div>
         <div className="pin-detail small">
           <button className="iconbtn small zoombtn" onClick={() => setZoom(fit ? "full" : "fit")}
@@ -237,7 +294,8 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
           {hp ? <>Pin <b>{hp.num}</b> · {hp.role}
                   {hp.port && <> · <span className="mono">{hp.port.name}</span> ({hp.port.direction}){hp.locked && " · locked"}</>}</>
               : <span className="muted">
-                  Drag a signal onto a pin to lock it there, or select a signal and click a free pin.
+                  Drag a pin's label (or a signal from the list) onto another pin to move it there;
+                  onto a used pin to swap the two.
                 </span>}
         </div>
       </div>
