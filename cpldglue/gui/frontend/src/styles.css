@@ -275,6 +275,8 @@ td.dir.inout { color: var(--k-b); }
 .pinout-drawing { display: flex; flex-direction: column; min-height: 0; padding: 8px; }
 .pinout-scroll { flex: 1; min-height: 0; display: flex; }
 .pinout-scroll > svg { flex: 1; min-height: 0; width: 100%; }
+/* labels are dragged, not selected */
+.pinout-scroll svg { user-select: none; -webkit-user-select: none; }
 .pinout-scroll.full { display: block; overflow: auto; }
 .pinout-scroll.full > svg { width: auto; display: block; margin: 0 auto; }
 .pin-detail { padding: 4px 8px; min-height: 24px; }

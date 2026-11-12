@@ -28,6 +28,11 @@ hidden = [
     "struct", "platform", "sysconfig", "configparser", "dataclasses", "functools",
     "contextlib", "zipfile", "shutil", "threading", "pathlib", "warnings", "io",
     "codecs", "encodings.idna",
+    # the downloaded Gowin tools (Apicula, cattrs, attrs, msgpack's fallback)
+    "argparse", "array", "ast", "bisect", "bz2", "lzma", "copy", "csv", "datetime", "dis",
+    "inspect", "ipaddress", "keyword", "linecache", "random", "unicodedata", "tokenize",
+    "gettext", "locale", "itertools", "collections.abc", "importlib.util",
+    "importlib.machinery", "textwrap", "traceback", "uuid",
 ]
 if sys.platform == "win32":
     hidden += ["ctypes.wintypes"]

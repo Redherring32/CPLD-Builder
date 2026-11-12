@@ -4,6 +4,9 @@ Everything goes in a per-user folder (data_dir()), never next to the app:
 
   nextpnr/        nextpnr-ice40 + icepack as WebAssembly (yowasp-nextpnr-ice40,
                   pinned, SHA-256 checked; runs on Yosys's runtime)
+  gowin/          nextpnr-himbaechel-gowin as WebAssembly, and Apicula's
+                  gowin_pack / gowin_unpack with their pure-Python dependencies
+                  (all pinned, SHA-256 checked; runs on Yosys's runtime)
   yosys/          Yosys as WebAssembly (the yowasp-yosys wheel and the small
                   runtime it needs), pinned versions, SHA-256 checked
   atf15xx_yosys/  cells.lib + techmap.v from hoglet67/atf15xx_yosys, pinned
@@ -71,6 +74,41 @@ NEXTPNR_WHEEL = Download(
     "yowasp_nextpnr_ice40-0.11.1.0.post826-py3-none-any.whl",
     "d220c8d6d936f3e6c91ed119d6ae58a638d0cd331e61be3e48b47fd743bd5607", 71785832,
     "yowasp_nextpnr_ice40-0.11.1.0.post826-py3-none-any.whl")
+# Gowin: nextpnr-himbaechel-gowin (WebAssembly) needs exactly Apicula 0.32,
+# whose chip databases match. Apicula's native speed-ups (msgspec, numpy,
+# fastcrc) are optional; without them it uses msgpack (pure-Python fallback,
+# from the sdist) and cattrs, so one set of files works on every platform.
+GOWIN_WHEELS = [
+    Download(f"{_PY}/b5/fa/1669cc62f41945724a2016d560f932a0f1431c4b931e6fb7ce74981b5435/"
+             "yowasp_nextpnr_himbaechel_gowin-0.11.1.0.post826-py3-none-any.whl",
+             "abe3938cd6266600e1adc57340e18bfbbda6a85b8493589649ec66b00f71c486", 27846006,
+             "yowasp_nextpnr_himbaechel_gowin-0.11.1.0.post826-py3-none-any.whl"),
+    Download(f"{_PY}/7d/5f/eb484a60a206098de747f8c3b232646e5bfe2fdd7ac5ef334ca162808dac/"
+             "apycula-0.32-py3-none-any.whl",
+             "9842eef0bb54d316f7a75d883d19bf042ed423c0c6f5d5f078c64e0c9e5f9c51", 3571664,
+             "apycula-0.32-py3-none-any.whl"),
+    Download(f"{_PY}/d8/2b/a40e1488fdfa02d3f9a653a61a5935ea08b3c2225ee818db6a76c7ba9695/"
+             "cattrs-25.3.0-py3-none-any.whl",
+             "9896e84e0a5bf723bc7b4b68f4481785367ce07a8a02e7e9ee6eb2819bc306ff", 70738,
+             "cattrs-25.3.0-py3-none-any.whl"),
+    Download(f"{_PY}/64/b4/17d4b0b2a2dc85a6df63d1157e028ed19f90d4cd97c36717afef2bc2f395/"
+             "attrs-26.1.0-py3-none-any.whl",
+             "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309", 67548,
+             "attrs-26.1.0-py3-none-any.whl"),
+    Download(f"{_PY}/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/"
+             "typing_extensions-4.16.0-py3-none-any.whl",
+             "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8", 45571,
+             "typing_extensions-4.16.0-py3-none-any.whl"),
+    Download(f"{_PY}/8a/0e/97c33bf5009bdbac74fd2beace167cab3f978feb69cc36f1ef79360d6c4e/"
+             "exceptiongroup-1.3.1-py3-none-any.whl",
+             "a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598", 16740,
+             "exceptiongroup-1.3.1-py3-none-any.whl"),
+]
+MSGPACK_SDIST = Download(
+    f"{_PY}/cc/52/1ec7ead2c7528bf3d1db73e886fa4df10f9e6f0eb7854a448b7090cfcef7/"
+    "msgpack-1.2.4.tar.gz",
+    "475c44e12f2a5de766a8448783f149c9b33f3f49b88953c6cd739a77d93c732c", 197764,
+    "msgpack-1.2.4.tar.gz")
 QUARTUS_URL = "https://www.intel.com/content/www/us/en/software-kit/711791/intel-quartus-ii-web-edition-design-software-version-13-0sp1-for-windows.html"
 WASMTIME = {
     "win32-amd64": Download(
@@ -126,6 +164,39 @@ def nextpnr_dir() -> Path:
 def nextpnr_installed() -> bool:
     return (nextpnr_dir() / "yowasp_nextpnr_ice40" / "__init__.py").exists() and \
         yosys_installed()
+
+
+def gowin_dir() -> Path:
+    return data_dir() / "gowin"
+
+
+def gowin_installed() -> bool:
+    d = gowin_dir()
+    return (d / "yowasp_nextpnr_himbaechel_gowin" / "__init__.py").exists() and \
+        (d / "apycula" / "gowin_pack.py").exists() and (d / "msgpack" / "fallback.py").exists() \
+        and yosys_installed()
+
+
+def run_gowin_tool(tool: str, argv: List[str]) -> int:
+    """Run the downloaded nextpnr-himbaechel, gowin_pack or gowin_unpack in
+    this process."""
+    sys.path.insert(0, str(yosys_dir()))           # yowasp runtime + wasmtime
+    sys.path.insert(0, str(gowin_dir()))
+    if tool == "nextpnr-himbaechel":
+        import yowasp_nextpnr_himbaechel_gowin as y  # noqa: E402
+        return y.run_nextpnr_himbaechel_gowin(argv)
+    import warnings
+    warnings.filterwarnings("ignore", message=".*not available, performance will be degraded")
+    os.environ["MSGPACK_PUREPYTHON"] = "1"
+    import importlib
+    mod = importlib.import_module({"gowin_pack": "apycula.gowin_pack",
+                                   "gowin_unpack": "apycula.gowin_unpack"}[tool])
+    sys.argv = [tool] + list(argv)
+    try:
+        mod.main()
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+    return 0
 
 
 def run_ice40_tool(tool: str, argv: List[str]) -> int:
@@ -279,6 +350,48 @@ def fetch_nextpnr(progress: Progress) -> str:
     return msg + "nextpnr-ice40 and icepack installed (iCE40 builds)."
 
 
+def fetch_gowin(progress: Progress) -> str:
+    msg = ""
+    if not yosys_installed():                       # nextpnr runs on Yosys's WebAssembly runtime
+        try:
+            from .yosys import find_yosys
+            native = find_yosys()[-1] != "_yosys"
+        except RuntimeError:
+            native = False
+        if not native or not _have_module("yowasp_runtime"):
+            msg = fetch_yosys(progress) + " "
+    items = GOWIN_WHEELS + [MSGPACK_SDIST]
+    total = sum(w.size for w in items)
+    base, files = 0, []
+    cache = data_dir() / "downloads"
+    for w in items:
+        files.append(download(w, cache, lambda d, t, m, b=base: progress(b + d, total, m),
+                              "Downloading the Gowin tools"))
+        base += w.size
+    tmp = data_dir() / "gowin.new"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    for f in files[:-1]:
+        progress(total, total, f"Unpacking {f.name}")
+        with zipfile.ZipFile(f) as z:
+            z.extractall(tmp)
+    import tarfile                                   # msgpack: just its Python files
+    with tarfile.open(files[-1], "r:gz") as t:
+        for m in t.getmembers():
+            parts = m.name.split("/")
+            if m.isfile() and len(parts) == 3 and parts[1] == "msgpack" \
+                    and parts[2].endswith(".py"):
+                (tmp / "msgpack").mkdir(exist_ok=True)
+                (tmp / "msgpack" / parts[2]).write_bytes(t.extractfile(m).read())
+    (tmp / "cpldglue-installed.json").write_text(
+        json.dumps({"files": [w.filename for w in items]}, indent=1), encoding="utf-8")
+    shutil.rmtree(gowin_dir(), ignore_errors=True)
+    tmp.replace(gowin_dir())
+    for f in files:
+        f.unlink(missing_ok=True)
+    return msg + "nextpnr-himbaechel-gowin and Apicula installed (Gowin builds)."
+
+
 def _have_module(name: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(name) is not None
@@ -338,7 +451,7 @@ def open_installer(setup: Path) -> None:
 
 
 FETCHERS = {"yosys": fetch_yosys, "flow": fetch_flow, "fitter": fetch_fitter,
-            "nextpnr": fetch_nextpnr}
+            "nextpnr": fetch_nextpnr, "gowin": fetch_gowin}
 
 
 # ---- status ------------------------------------------------------------------
@@ -377,6 +490,14 @@ def status() -> List[dict]:
                 "where": (f"{nextpnr_dir()} (downloaded)" if nx and nx.endswith("_nextpnr-ice40")
                           else nx), "needed_for": "Build for iCE40 FPGAs (.bin)",
                 "download": "about 72 MB from PyPI (yowasp-nextpnr-ice40, runs as WebAssembly)",
+                "can_fetch": platform_key() in WASMTIME})
+    from . import gowin
+    gw = gowin.tools_found()
+    out.append({"id": "gowin", "title": "nextpnr-himbaechel-gowin + Apicula", "found": bool(gw),
+                "where": (f"{gowin_dir()} (downloaded)" if gw and gw.endswith("_nextpnr-himbaechel")
+                          else gw), "needed_for": "Build for Gowin FPGAs (.fs)",
+                "download": "about 32 MB from PyPI (yowasp-nextpnr-himbaechel-gowin, runs as "
+                            "WebAssembly; Apicula, pure Python)",
                 "can_fetch": platform_key() in WASMTIME})
     q = max7000.find_quartus()
     out.append({"id": "quartus", "title": "Quartus II 13.0 SP1 (MAX 7000S)", "found": bool(q),

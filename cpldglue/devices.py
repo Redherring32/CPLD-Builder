@@ -10,6 +10,7 @@ tool sizes the design in LUTs/DFFs and prints a sheet for Go Configure.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -52,7 +53,7 @@ class Device:
     packages: Dict[str, Package]
     vcc: float = 5.0
     fitter_tech: str = ""       # -tech name the Microchip fitter accepts
-    kind: str = "cpld"          # "cpld" (ATF15xx), "max7000", "greenpak", "gal" or "ice40"
+    kind: str = "cpld"          # "cpld" (ATF15xx), "max7000", "greenpak", "gal", "ice40", "gowin"
     # GreenPAK logic cells: slot type -> count. A slot type names what a cell
     # can be: "lut3_dff" is a 3-bit LUT or a DFF/latch.
     resources: Dict[str, int] = field(default_factory=dict)
@@ -61,7 +62,8 @@ class Device:
 
     @property
     def family(self) -> str:    # ATF1502 / ATF1504 / ATF1508, or the GreenPAK part
-        return self.name if self.kind in ("greenpak", "gal", "ice40", "max7000") else self.name[:7]
+        return self.name if self.kind in ("greenpak", "gal", "ice40", "gowin", "max7000") \
+            else self.name[:7]
 
 
 # Packages per family, from the Microchip datasheets / BSDL set.
@@ -394,6 +396,59 @@ DEVICES["ICE40UP5K"] = Device(
     3.3, kind="ice40", resources={"lut": 5280}, supply="1.2 V core, 3.3 V I/O",
     note="FPGA: 5280 LUTs; I/O is 3.3 V, not 5 V tolerant; RGB pins 39-41 are LED "
          "drivers (outputs only)")
+
+
+# ---- Gowin LittleBee (I/O pins from Apicula, names from a KiCad library; see
+# gowinpins.py) ------------------------------------------------------------------------
+# Pins that configure or program the chip stay out of the I/O list: JTAG (it
+# programs the chip), RECONFIG_N, JTAGSEL_N, MODE, DONE and READY.
+GOWIN_RESERVED = ("TMS", "TCK", "TDI", "TDO", "JTAGSEL_N", "RECONFIG_N", "MODE0", "MODE1",
+                  "MODE2", "DONE", "READY")
+# Configuration-port pins that work as ordinary I/O after a gowin_pack switch
+GOWIN_CONFIG_PINS = {"SSPI_CS_N", "SO", "SI", "SCLK", "MCLK", "MCS_N", "MO", "MI", "FASTRD_N",
+                     "DIN", "DOUT", "CLKHOLD_N", "WE_N", "SDA", "SCL",
+                     *(f"D{i}" for i in range(8))}
+
+
+def _gowin_package(key: str, name: str, sides, footprint: str = "") -> Package:
+    from .gowinpins import GOWIN_PINS
+    t = GOWIN_PINS[key]
+    names = dict(t["names"])
+    # Only the A/B pads of each I/O tile: the GW1N-4's extra pads in row 10
+    # (IOL10C-J, IOR10C-J) read back from the bitstream as unused inputs even
+    # when a design drives them, so they aren't offered until that's understood.
+    io = [n for n in t["io"]
+          if not set(names[n].split("/")[1:]) & set(GOWIN_RESERVED)
+          and re.match(r"IO[LRTB]\d+[AB](/|$)", names[n])]
+    # automatic pin assignment takes pins in this order: plain I/O first, then
+    # the configuration-port pins (they need a gowin_pack switch; see gowin.py)
+    io.sort(key=lambda n: (bool(set(names[n].split("/")[1:]) & GOWIN_CONFIG_PINS), n))
+    power = {n: ("GND" if v == "VSS" else "VCC") for n, v in names.items()
+             if n not in t["io"] and v.startswith(("VCC", "VSS"))}
+    nc = [n for n, v in names.items() if v == "NC"]
+    reserved = {v: n for n, v in names.items()
+                if n not in io and n not in power and n not in nc}
+    return Package(name, io, {}, {}, power, len(names), nc, reserved=reserved,
+                   pin_names=names, style="qfn", sides=sides, footprint=footprint)
+
+
+_LQ144 = "Package_QFP:LQFP-144_20x20mm_P0.5mm"
+_GW_NOTE = ("FPGA with on-chip flash: {luts} LUTs; I/O is 3.3 V, not 5 V tolerant; "
+            "JTAG pins are kept for programming")
+for _name, _luts, _pkgs in (
+        ("GW1NZ-1", 1152, {"FN32": ("GW1NZ-1-QN32", (8, 8, 8, 8), "")}),
+        ("GW1N-4", 4608, {"QN48": ("GW1N-4-QN48", (12, 12, 12, 12), ""),
+                          "QN88": ("GW1N-4-QN88", (22, 22, 22, 22), ""),
+                          "LQ144": ("GW1N-4-LQ144", (36, 36, 36, 36), _LQ144)}),
+        ("GW1N-9", 8640, {"QN48": ("GW1N-9-QN48", (12, 12, 12, 12), ""),
+                          "QN88": ("GW1N-9-QN88", (22, 22, 22, 22), ""),
+                          "LQ144": ("GW1N-9-LQ144", (36, 36, 36, 36), _LQ144)}),
+        ("GW1NR-9", 8640, {"QN88P": ("GW1NR-9-QN88P", (22, 22, 22, 22), "")})):
+    DEVICES[_name] = Device(
+        _name, 0, {p: _gowin_package(k, p, s, fp) for p, (k, s, fp) in _pkgs.items()},
+        3.3, kind="gowin", resources={"lut": _luts},
+        supply="LV: 1.2 V core; UV: one 2.5/3.3 V supply; 3.3 V I/O",
+        note=_GW_NOTE.format(luts=_luts))
 
 
 def get_package(device: str, package: str) -> Tuple[Device, Package]:

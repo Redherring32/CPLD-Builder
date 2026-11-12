@@ -56,14 +56,15 @@ class TestDownload(TempHome):
         self.assertEqual(list((self.tmp / "dl").iterdir()), [])     # nothing left behind
 
     def test_pinned_downloads_are_complete(self):
-        for d in deps.YOSYS_WHEELS + list(deps.WASMTIME.values()) + [deps.PROCHIP, deps.NEXTPNR_WHEEL]:
+        for d in (deps.YOSYS_WHEELS + list(deps.WASMTIME.values()) + deps.GOWIN_WHEELS
+                  + [deps.PROCHIP, deps.NEXTPNR_WHEEL, deps.MSGPACK_SDIST]):
             self.assertRegex(d.sha256, r"^[0-9a-f]{64}$")
             self.assertTrue(d.url.endswith(d.filename))
         self.assertEqual(set(deps.FLOW_FILES), {"cells.lib", "techmap.v", "README.txt"})
 
     def test_status_with_nothing_downloaded(self):
         st = {d["id"]: d for d in deps.status()}
-        self.assertEqual(list(st), ["yosys", "flow", "fitter", "nextpnr", "quartus", "kicad"])
+        self.assertEqual(list(st), ["yosys", "flow", "fitter", "nextpnr", "gowin", "quartus", "kicad"])
         self.assertFalse(st["flow"]["found"])
         self.assertIsNone(deps.flow_dir())
 

@@ -1,7 +1,7 @@
 # cpldglue
 
 Merge 74-series and CD4000-series glue logic into one Microchip ATF15xx
-CPLD (or a MAX 7000S CPLD, a GAL, a GreenPAK or a small iCE40 FPGA). You pick the chips; cpldglue reads how they are wired (from a
+CPLD (or a MAX 7000S CPLD, a GAL, a GreenPAK or a small iCE40 or Gowin FPGA). You pick the chips; cpldglue reads how they are wired (from a
 KiCad schematic or a small text netlist) and generates:
 
 - one self-contained Verilog file (top level plus the chip models it uses),
@@ -353,6 +353,51 @@ Pin tables come from KiCad's FPGA_Lattice library and are checked against
 Project IceStorm's I/O list; the UP5K's RGB pins (39-41) are LED drivers, so
 only outputs go there.
 
+## Gowin FPGAs (open tool chain)
+
+The Gowin LittleBee GW1NZ-1 (FN32), GW1N-4 and GW1N-9 (QN48, QN88, LQ144) and
+GW1NR-9 (QN88P, the Tang Nano 9K's chip) keep their configuration in on-chip
+flash, so nothing else is needed on the board. They are supported with the
+open tools: Yosys (`synth_gowin`), nextpnr-himbaechel and Project Apicula's
+gowin_pack. **Build** writes `NAME.cst` (the editor's pins) and `NAME.fs`
+(the bitstream: `openFPGALoader -f NAME.fs`, or Gowin's programmer), and
+reports the LUTs used and the maximum clock frequency. The tools come from
+Setup (`cpldglue setup gowin`, about 32 MB: nextpnr as WebAssembly, Apicula
+0.32 and its dependencies as pure Python, so the same files work on Windows
+and Linux) unless a native `nextpnr-himbaechel` / `gowin_pack` is on the PATH.
+
+Two checks, both simulated against the design:
+
+- the synthesised netlist (Yosys's Gowin cell models, as for the iCE40);
+- the **bitstream itself**, read back with Apicula's `gowin_unpack` and wired
+  up through the pin numbers in the `.cst`. This covers placement, routing,
+  packing and the pins, as far as Apicula's decoder knows the chip. Two gaps
+  are patched and the log says so: gowin_unpack doesn't follow clocks through
+  the global clock network, so each flip-flop's or latch's clock pin is taken
+  from nextpnr's netlist; and a LUT with no fuses set (nextpnr's constant 1)
+  is modelled as Apicula describes it, all ones.
+
+Things to know:
+
+- I/O is **3.3 V and not 5 V tolerant**: a 5 V board needs level shifters.
+- The JTAG pins (they program the chip), RECONFIG_N, JTAGSEL_N, MODE, DONE
+  and READY aren't offered as I/O.
+- Automatic pin assignment uses plain I/O first. Configuration-port pins
+  (SSPI, MSPI, the CPU port, I2C) work as I/O when you put a signal there:
+  Build passes gowin_pack the matching `--sspi_as_gpio` etc.
+- Synthesis uses `-noalu` (no carry chains): glue logic doesn't need them,
+  and gowin_unpack doesn't read them back faithfully.
+- On the GW1N-4, the extra pads in row 10 (IOL10C-J, IOR10C-J) read back as
+  unused inputs even when driven, so they're left out of the I/O for now.
+- Yosys's Gowin `IOBUF` simulation model drives the wrong pin; the checks use
+  a corrected copy.
+- Pin tables: the I/O list is Apicula's (what nextpnr can use); pin names and
+  power pins are from the community `gowin_fpga.lib` KiCad library
+  (devbisme/KiCad-Schematic-Symbol-Libraries, Unlicense). The two agree on
+  every I/O pin; `tools/gowin_pins.py` regenerates `cpldglue/gowinpins.py`.
+  QFN footprints aren't filled in: pick one from Gowin's package drawing.
+- No cpldglue Gowin bitstream has been tried on a chip yet.
+
 ## MAX 7000S (Quartus)
 
 The Altera/Intel EPM7032S, EPM7064S and EPM7128S (PLCC44, TQFP44, PLCC84)
@@ -379,7 +424,8 @@ The whole ATF15xx family, in every package Microchip lists:
 
 Also, see above: the MAX 7000S EPM7032S / EPM7064S / EPM7128S, the GAL16V8
 (DIP20, PLCC20), GAL20V8, GAL20RA10 and GAL22V10 (DIP24, PLCC28), the iCE40HX1K /
-HX4K (TQ144) and iCE40UP5K (SG48) FPGAs, and eleven GreenPAKs.
+HX4K (TQ144) and iCE40UP5K (SG48) FPGAs, the Gowin GW1NZ-1, GW1N-4, GW1N-9 and
+GW1NR-9 FPGAs, and eleven GreenPAKs.
 
 `python -m cpldglue devices` lists the I/O count of each. The pin tables
 (I/O, JTAG, the four dedicated inputs, VCC/GND and no-connects) are
@@ -511,6 +557,13 @@ cd cpldglue/gui/frontend && npm test
   '245) whose synthesised netlists are simulated against the design, and that
   this check catches a changed output. The iCE40 builds need nextpnr-ice40
   (`pip install yowasp-nextpnr-ice40`), and are skipped without it.
+- Gowin (`tests/test_gowin.py`): every package pin exactly once, programming
+  pins kept, plain pins first; the .cst, pad naming and gowin_pack switches;
+  real builds (GW1N-4 counter, Tang Nano 9K bidirectional '245, GW1NZ-1
+  decoder, '74 with preset / clear plus '373 latches, signals on SSPI/CPU
+  pins) whose synthesised netlist AND read-back bitstream are simulated
+  against the design, and swapped pins are caught. The builds need the Gowin
+  tools (`cpldglue setup gowin` or `pip install yowasp-nextpnr-himbaechel-gowin`).
 
 ## Things to keep in mind
 

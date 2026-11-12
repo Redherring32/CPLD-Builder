@@ -8,7 +8,7 @@ export function BuildDialog({ design, config, onClose, onSetup, greenpak = false
   design: Design; config: BuildConfig; onClose: () => void; onSetup: () => void;
   greenpak?: boolean; gal?: boolean; kind?: string;
 }) {
-  const ice40 = kind === "ice40", max = kind === "max7000";
+  const ice40 = kind === "ice40", gowin = kind === "gowin", max = kind === "max7000";
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; log: string } | null>(null);
 
@@ -46,6 +46,15 @@ export function BuildDialog({ design, config, onClose, onSetup, greenpak = false
             <li>nextpnr: <span className="mono">{config.nextpnr ?? "not found — get it from Setup"}</span></li>
             <li className="muted">Output goes to a <span className="mono">build/</span> folder next to the project file.</li>
           </ul>
+        ) : gowin ? (
+          <ul className="small build-cfg">
+            <li>Yosys synthesises the design, nextpnr-himbaechel places and routes it,
+              gowin_pack (Apicula) makes the bitstream (<span className="mono">.fs</span>, for
+              openFPGALoader or Gowin's programmer). The synthesised netlist, and the bitstream
+              read back with gowin_unpack, are simulated against the design.</li>
+            <li>nextpnr: <span className="mono">{config.gowin ?? "not found — get it from Setup"}</span></li>
+            <li className="muted">Output goes to a <span className="mono">build/</span> folder next to the project file.</li>
+          </ul>
         ) : max ? (
           <ul className="small build-cfg">
             <li>Writes a Quartus project (<span className="mono">.qpf/.qsf</span> with the device
@@ -75,13 +84,13 @@ export function BuildDialog({ design, config, onClose, onSetup, greenpak = false
         )}
         </>}
         <div className="modal-foot">
-          {!greenpak && !gal && (ice40 ? !config.nextpnr : max ? !config.quartus
+          {!greenpak && !gal && (ice40 ? !config.nextpnr : gowin ? !config.gowin : max ? !config.quartus
                                      : (!config.flow_dir || !config.fitter)) &&
             <button onClick={onSetup} disabled={running}>Get missing tools…</button>}
           <span className="spacer" />
           <button onClick={onClose} disabled={running}>Close</button>
           {!greenpak && <button className="primary" onClick={go}
-                                disabled={running || (!gal && !ice40 && !max && !config.flow_dir)}>
+                                disabled={running || (!gal && !ice40 && !gowin && !max && !config.flow_dir)}>
             {running ? "Building…" : result ? "Build again" : "Build"}
           </button>}
         </div>

@@ -164,6 +164,7 @@ export function PinoutView({ design, device, gen, selectedNet, onSelectNet,
   };
   const startDrag = (e: RPointerEvent, p: PinInfo) => {
     if (!p.port || e.button !== 0) return;
+    e.preventDefault();                       // no text selection while dragging
     // The drag lives in this closure (events can arrive before React renders).
     const cur = { signal: p.port.name, from: p.num, x: e.clientX, y: e.clientY, moved: false };
     const sx = e.clientX, sy = e.clientY;

@@ -119,7 +119,7 @@ export function kicadPreview(path: string, refs: string[], overrides: Record<str
 // ---- Build ----
 export interface BuildConfig {
   enabled: boolean; flow_ok: boolean; flow_dir: string | null; fitter: string | null;
-  nextpnr?: string | null; quartus?: string | null;
+  nextpnr?: string | null; gowin?: string | null; quartus?: string | null;
 }
 export function buildConfig(design: Design) {
   return post<BuildConfig>("api/build/config", { design });

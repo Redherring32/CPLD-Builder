@@ -176,13 +176,18 @@ def build(design: Design, r: Optional[Result] = None) -> Export:
     dev = devices.DEVICES[design.device.upper()]
     _, pkg = devices.get_package(design.device, design.package)
     fp = pkg.footprint or FOOTPRINTS.get(design.package.upper(), "")
-    what = ("GreenPAK" if dev.kind == "greenpak" else f"CPLD, {dev.macrocells} macrocells")
+    what = ("GreenPAK" if dev.kind == "greenpak" else
+            f"FPGA, {dev.resources.get('lut')} LUTs" if dev.kind in ("ice40", "gowin") else
+            f"CPLD, {dev.macrocells} macrocells")
     props_lib = [
         ("Reference", "U", 0, body_top + 1.27, False),
         ("Value", f"{dev.name}-{design.package}", 0, body_bottom - 1.27, False),
         ("Footprint", fp, 0, body_bottom - 3.81, True),
         ("Datasheet", (f"https://www.renesas.com/en/document/dst/{dev.name.lower()}-datasheet"
                        if dev.kind == "greenpak" else
+                       "https://www.gowinsemi.com/en/product/littlebee_fpga/"
+                       if dev.kind == "gowin" else
+                       "https://www.latticesemi.com/iCE40" if dev.kind == "ice40" else
                        "https://www.microchip.com/en-us/search?searchQuery="
                        + (dev.family.replace("GAL", "ATF") if dev.kind == "gal" else dev.family)),
          0, body_bottom - 6.35, True),

@@ -523,12 +523,17 @@ def generate(design: Design, assign: bool = True) -> Result:
                            f"check (needs Yosys) and enter it in Renesas Go Configure "
                            f"from the LUT sheet; {dev.note}.")
         dev = None                 # no macrocell estimate for GreenPAKs
-    is_ice40 = bool(dev and dev.kind == "ice40")
+    is_ice40 = bool(dev and dev.kind in ("ice40", "gowin"))
     if is_ice40:
         r.notes.append(f"{dev.name} is an FPGA: Build synthesises it with Yosys and places "
                        f"it with nextpnr ({dev.resources.get('lut')} LUTs; glue logic uses a "
                        f"tiny fraction). Its I/O is 3.3 V and not 5 V tolerant: use level "
                        f"shifters on a 5 V board.")
+        if dev.kind == "gowin":
+            r.notes.append(f"{dev.name} keeps its configuration in on-chip flash: program "
+                           f"the .fs over JTAG (openFPGALoader or Gowin's programmer). "
+                           f"The JTAG, RECONFIG_N, MODE, DONE and READY pins aren't used "
+                           f"as I/O.")
         dev = None                 # no macrocell estimate for FPGAs
     if dev and dev.kind == "max7000":
         r.notes.append(f"{dev.name}: {dev.note}. The macrocell estimate works as for the "

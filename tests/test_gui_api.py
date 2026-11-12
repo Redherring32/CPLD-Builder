@@ -372,7 +372,7 @@ class TestServer(unittest.TestCase):
     def test_deps_status(self):
         _, _, body = self.get("/api/deps")
         ids = [d["id"] for d in json.loads(body)["deps"]]
-        self.assertEqual(ids, ["yosys", "flow", "fitter", "nextpnr", "quartus", "kicad"])
+        self.assertEqual(ids, ["yosys", "flow", "fitter", "nextpnr", "gowin", "quartus", "kicad"])
         with self.assertRaises(urllib.error.HTTPError):
             self.post("/api/deps/fetch", {"id": "nonsense"})
 
